@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,13 +24,16 @@ import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftIma
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftStatus;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import com.commercefoundry.global.properties.ProductDraftProperties;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -44,6 +48,7 @@ class ProductDraftGenerationProcessorTest {
 
     private static final Instant NOW = Instant.parse("2026-11-17T03:00:00.123456789Z");
     private static final Instant NOW_MICROS = Instant.parse("2026-11-17T03:00:00.123456Z");
+    private static final Duration SLOT_TTL = Duration.ofMinutes(30);
     private static final ProductDraftFacts FACTS = new ProductDraftFacts("린넨 \"저고리\"", 12L, List.of("린넨 100%"), List.of(), "총장 62cm\n가슴 54cm", null,
         List.of(), "차분하게", List.of("여름"), List.of());
     private static final ProductDraftImage IMAGE = new ProductDraftImage("https://cdn.example.com/media/a.png", ProductDraftImageType.THUMBNAIL, 1200, null,
@@ -51,7 +56,13 @@ class ProductDraftGenerationProcessorTest {
 
     private final ProductDraftRepositoryPort port = mock(ProductDraftRepositoryPort.class);
     private final ProductDraftGenerationPort generationPort = mock(ProductDraftGenerationPort.class);
-    private final ProductDraftGenerationProcessor processor = new ProductDraftGenerationProcessor(port, generationPort, Clock.fixed(NOW, ZoneOffset.UTC));
+    private final ProductDraftGenerationProcessor processor = new ProductDraftGenerationProcessor(port, generationPort,
+        new ProductDraftProperties(Duration.ofDays(7), true, SLOT_TTL), Clock.fixed(NOW, ZoneOffset.UTC));
+
+    @BeforeEach
+    void openGate() {
+        given(port.lockGenerationGate()).willReturn(true);
+    }
 
     private static ProductDraft draft(ProductDraftStatus status, Instant expiresAt, List<ProductDraftImage> images, ProductDraftGeneration generation) {
         return new ProductDraft(7L, status, 100L, FACTS, images, null, null, expiresAt, NOW.minusSeconds(60), generation);
@@ -193,6 +204,162 @@ class ProductDraftGenerationProcessorTest {
     }
 
     @Nested
+    @DisplayName("매장 전체 동시 생성 게이트 (B3, D13)")
+    class Gate {
+
+        @Test
+        @DisplayName("게이트를 잠근 뒤 자리를 센다 — 기준은 지금과 자리 시간(30분) 전이고, 2건이면 시작한다")
+        void countsAfterLock() {
+            stored(draft(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(IMAGE), ProductDraftGeneration.NONE));
+            given(port.countGenerationSlots(NOW, NOW.minus(SLOT_TTL))).willReturn(2L);
+
+            processor.claim(7L, 200L);
+
+            var order = inOrder(port);
+            order.verify(port).lockGenerationGate();
+            order.verify(port).countGenerationSlots(NOW, NOW.minus(SLOT_TTL));
+            order.verify(port).updateGeneration(any());
+        }
+
+        @Test
+        @DisplayName("자리가 3건 찼으면 053 이고 초안을 바꾸지 않는다")
+        void full() {
+            stored(draft(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(IMAGE), ProductDraftGeneration.NONE));
+            given(port.countGenerationSlots(any(), any())).willReturn(3L);
+
+            assertCode(() -> processor.claim(7L, 200L), ProductDraftErrorCode.GENERATION_SLOTS_FULL);
+            verify(port, never()).updateGeneration(any());
+        }
+
+        @Test
+        @DisplayName("게이트 행이 없으면(운영 DDL insert 누락) 502 이고 초안을 바꾸지 않는다")
+        void missingGateRow() {
+            stored(draft(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(IMAGE), ProductDraftGeneration.NONE));
+            given(port.lockGenerationGate()).willReturn(false);
+
+            assertCode(() -> processor.claim(7L, 200L), ProductDraftErrorCode.GENERATION_UNAVAILABLE);
+            verify(port, never()).countGenerationSlots(any(), any());
+            verify(port, never()).updateGeneration(any());
+        }
+
+        @Test
+        @DisplayName("이미 시작한 회차의 재등록 · 생성 중 재시도는 게이트를 지나지 않는다 — 자리는 회차를 시작할 때 잡았다")
+        void replayDoesNotTakeSlot() {
+            stored(draft(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(IMAGE), new ProductDraftGeneration(1, 200L, NOW_MICROS, "f".repeat(64), null)));
+            processor.claim(7L, 300L);
+            stored(draft(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(IMAGE), new ProductDraftGeneration(2, 200L, NOW_MICROS, "f".repeat(64), null)));
+            processor.claimRegeneration(7L, 300L, 1);
+
+            verify(port, never()).lockGenerationGate();
+            verify(port, never()).countGenerationSlots(any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("재생성 (B3)")
+    class Regenerate {
+
+        private static final String HASH = "f".repeat(64);
+
+        private ProductDraft finished(ProductDraftStatus status, int generationNo, String failureCode, Instant expiresAt) {
+            return new ProductDraft(7L, status, 100L, FACTS, List.of(IMAGE), null, null, expiresAt, NOW.minusSeconds(60),
+                new ProductDraftGeneration(generationNo, 200L, NOW_MICROS.minusSeconds(600), HASH, 9L), null, failureCode);
+        }
+
+        @Test
+        @DisplayName("검토 대기 · 지금 회차가 맞으면 다음 회차로 시작한다 — 생성 대기, 새 어드민 · 시각, 작업 없음, 이전 결과 없음")
+        void fromReady() {
+            stored(finished(ProductDraftStatus.READY, 1, null, NOW.plusSeconds(60)));
+
+            ProductDraft claimed = processor.claimRegeneration(7L, 300L, 1);
+
+            verify(port).updateGeneration(claimed);
+            assertThat(claimed.status()).isEqualTo(ProductDraftStatus.REQUESTED);
+            assertThat(claimed.generation()).isEqualTo(new ProductDraftGeneration(2, 300L, NOW_MICROS, processor.inputHash(claimed), null));
+            assertThat(claimed.candidate()).isNull();
+            assertThat(claimed.failureCode()).isNull();
+            assertThat(claimed.awaitingGenerationJob()).isTrue();
+        }
+
+        @Test
+        @DisplayName("다시 만들 수 있는 실패(AI 오류 · 취소 · 한도 초과)도 다음 회차로 시작한다")
+        void fromRetryableFailure() {
+            for (String code : List.of("PRODUCT_DRAFT_AI_FAILED", ProductDraft.GENERATION_CANCELLED, "PRODUCT_DRAFT_AI_BUDGET_EXCEEDED", "RUN_TIMEOUT")) {
+                stored(finished(ProductDraftStatus.FAILED, 2, code, NOW.plusSeconds(60)));
+                assertThat(processor.claimRegeneration(7L, 300L, 2).generation().generationNo()).isEqualTo(3);
+            }
+        }
+
+        @Test
+        @DisplayName("같은 요청의 재시도(이미 다음 회차 생성 대기 · 생성 중)는 그대로 돌려주고 회차를 다시 올리지 않는다")
+        void retryIsIdempotent() {
+            ProductDraft waiting = draft(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60), List.of(IMAGE), new ProductDraftGeneration(2, 300L, NOW_MICROS, HASH, null));
+            stored(waiting);
+            assertThat(processor.claimRegeneration(7L, 400L, 1)).isEqualTo(waiting);
+
+            ProductDraft generating = draft(ProductDraftStatus.GENERATING, NOW.plusSeconds(60), List.of(IMAGE), new ProductDraftGeneration(2, 300L, NOW_MICROS, HASH, 10L));
+            stored(generating);
+            assertThat(processor.claimRegeneration(7L, 400L, 1)).isEqualTo(generating);
+
+            verify(port, never()).updateGeneration(any());
+        }
+
+        @Test
+        @DisplayName("회차가 화면과 다르면 025 다 — 오래된 화면의 재생성이 회차를 하나 더 쓰지 않는다")
+        void staleGenerationNo() {
+            stored(finished(ProductDraftStatus.READY, 2, null, NOW.plusSeconds(60)));
+            assertCode(() -> processor.claimRegeneration(7L, 300L, 1), ProductDraftErrorCode.DRAFT_BUSY);
+
+            stored(finished(ProductDraftStatus.READY, 1, null, NOW.plusSeconds(60)));
+            assertCode(() -> processor.claimRegeneration(7L, 300L, 2), ProductDraftErrorCode.DRAFT_BUSY);
+            verify(port, never()).updateGeneration(any());
+        }
+
+        @Test
+        @DisplayName("3회차를 다 썼으면 054, 새 초안이 필요한 실패면 055, 만료면 022 다")
+        void refusals() {
+            stored(finished(ProductDraftStatus.READY, 3, null, NOW.plusSeconds(60)));
+            assertCode(() -> processor.claimRegeneration(7L, 300L, 3), ProductDraftErrorCode.REGENERATION_EXHAUSTED);
+
+            stored(finished(ProductDraftStatus.FAILED, 3, "PRODUCT_DRAFT_AI_FAILED", NOW.plusSeconds(60)));
+            assertCode(() -> processor.claimRegeneration(7L, 300L, 3), ProductDraftErrorCode.REGENERATION_EXHAUSTED);
+
+            for (String code : List.of("PRODUCT_DRAFT_IMAGE_CHANGED", "PRODUCT_DRAFT_INPUT_EXPIRED", ProductDraft.GENERATION_RESULT_EXPIRED,
+                "PRODUCT_DRAFT_INPUT_REJECTED")) {
+                stored(finished(ProductDraftStatus.FAILED, 1, code, NOW.plusSeconds(60)));
+                assertCode(() -> processor.claimRegeneration(7L, 300L, 1), ProductDraftErrorCode.REGENERATION_NEW_DRAFT_REQUIRED);
+            }
+
+            stored(finished(ProductDraftStatus.READY, 1, null, NOW));
+            assertCode(() -> processor.claimRegeneration(7L, 300L, 1), ProductDraftErrorCode.DRAFT_EXPIRED);
+            verify(port, never()).updateGeneration(any());
+        }
+
+        @Test
+        @DisplayName("생성 중 · 적용 · 거절 초안은 051 이다 — 이전 회차가 끝나기 전에 다음 회차를 열지 않는다")
+        void notFinished() {
+            stored(draft(ProductDraftStatus.GENERATING, NOW.plusSeconds(60), List.of(IMAGE), new ProductDraftGeneration(1, 200L, NOW_MICROS, HASH, 9L)));
+            assertCode(() -> processor.claimRegeneration(7L, 300L, 1), ProductDraftErrorCode.GENERATION_NOT_STARTABLE);
+
+            stored(new ProductDraft(7L, ProductDraftStatus.REJECTED, 100L, FACTS, List.of(IMAGE), 300L, NOW, NOW.plusSeconds(60), NOW.minusSeconds(60),
+                new ProductDraftGeneration(1, 200L, NOW_MICROS, HASH, 9L)));
+            assertCode(() -> processor.claimRegeneration(7L, 300L, 1), ProductDraftErrorCode.GENERATION_NOT_STARTABLE);
+            verify(port, never()).updateGeneration(any());
+        }
+
+        @Test
+        @DisplayName("재생성도 게이트를 지난다 — 자리가 찼으면 053 이고 이전 결과를 지우지 않는다")
+        void gated() {
+            stored(finished(ProductDraftStatus.READY, 1, null, NOW.plusSeconds(60)));
+            given(port.countGenerationSlots(any(), any())).willReturn(3L);
+
+            assertCode(() -> processor.claimRegeneration(7L, 300L, 1), ProductDraftErrorCode.GENERATION_SLOTS_FULL);
+            verify(port).lockGenerationGate();
+            verify(port, never()).updateGeneration(any());
+        }
+    }
+
+    @Nested
     @DisplayName("작업 연결")
     class Bind {
 
@@ -263,6 +430,8 @@ class ProductDraftGenerationProcessorTest {
         assertThat(ProductDraftGenerationProcessor.class.getMethod("claim", long.class, long.class).getAnnotation(Transactional.class).propagation())
             .isEqualTo(Propagation.REQUIRES_NEW);
         assertThat(ProductDraftGenerationProcessor.class.getMethod("bind", ProductDraft.class, long.class)
+            .getAnnotation(Transactional.class).propagation()).isEqualTo(Propagation.REQUIRES_NEW);
+        assertThat(ProductDraftGenerationProcessor.class.getMethod("claimRegeneration", long.class, long.class, int.class)
             .getAnnotation(Transactional.class).propagation()).isEqualTo(Propagation.REQUIRES_NEW);
     }
 }

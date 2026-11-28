@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.productdraft.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.productdraft.adapter.out.persistence.entity.ProductDraftEntity;
+import com.commercefoundry.domainlayer.productdraft.adapter.out.persistence.repository.ProductDraftGenerationGateRepository;
 import com.commercefoundry.domainlayer.productdraft.adapter.out.persistence.repository.ProductDraftRepository;
 import com.commercefoundry.domainlayer.productdraft.application.port.out.ProductDraftRepositoryPort;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
@@ -10,6 +11,7 @@ import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftGen
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImage;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageSource;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftImageType;
+import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftStatus;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -29,8 +31,13 @@ import tools.jackson.databind.json.JsonMapper;
 public class ProductDraftRepositoryAdapter implements ProductDraftRepositoryPort {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    /** 단일 게이트 행 아이디 — 표 CHECK {@code id = 1} 과 같다. */
+    private static final int GENERATION_GATE_ID = 1;
+    /** 생성 자리를 차지하는 상태 — 회차를 시작한 생성 대기(등록 응답 반영 전) · 생성 중. */
+    private static final List<ProductDraftStatus> GENERATION_SLOT_STATUSES = List.of(ProductDraftStatus.REQUESTED, ProductDraftStatus.GENERATING);
 
     private final ProductDraftRepository productDraftRepository;
+    private final ProductDraftGenerationGateRepository productDraftGenerationGateRepository;
 
     @Override
     public Optional<ProductDraft> findById(long draftId) {
@@ -80,6 +87,16 @@ public class ProductDraftRepositoryAdapter implements ProductDraftRepositoryPort
         }
         managed(draft.id()).recordGenerationResult(draft.status(), result, draft.failureCode());
         productDraftRepository.flush();
+    }
+
+    @Override
+    public boolean lockGenerationGate() {
+        return productDraftGenerationGateRepository.findByIdForUpdate(GENERATION_GATE_ID).isPresent();
+    }
+
+    @Override
+    public long countGenerationSlots(Instant now, Instant since) {
+        return productDraftRepository.countGenerationSlots(GENERATION_SLOT_STATUSES, now, since);
     }
 
     private ProductDraftEntity managed(long draftId) {

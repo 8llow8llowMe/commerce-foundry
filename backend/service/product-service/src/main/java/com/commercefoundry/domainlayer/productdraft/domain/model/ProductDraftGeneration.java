@@ -7,8 +7,8 @@ import java.util.Objects;
  * 초안의 AI 생성 회차 (#359 PR-B1). operations 영수증은 (초안, 회차)마다 hash · 요청자 · 만료 시각을 대조해 같은 값이면 재생하고 다르면 409 다 —
  * 그래서 회차를 시작(claim)할 때 정한 값을 여기 고정하고, 같은 회차의 재시도는 다른 어드민이 눌러도 이 값을 그대로 보낸다.
  *
- * <p>회차는 claim 때 하나 오르고, 등록 응답을 반영하면 {@code jobId} 가 붙는다. B1 은 1회차까지만 오른다 — 재생성(다음 회차, 최대 {@link #MAX_GENERATION_NO})은 B3 에서
- * {@link ProductDraft#claimGeneration} 의 허용 상태를 넓혀 연다.
+ * <p>회차는 claim 때 하나 오르고, 등록 응답을 반영하면 {@code jobId} 가 붙는다. 재생성(#359 B3)은 끝난 회차(검토 대기 · 다시 생성할 수 있는 실패)에서 다음 회차를 연다 —
+ * 최대 {@link #MAX_GENERATION_NO} 회차이고 실패한 회차도 센다({@link ProductDraft#regenerationAvailableAt}). 새 회차는 그 회차를 시작한 어드민 · 시각으로 고정한다.
  *
  * @param generationNo 시작한 회차. 0 이면 아직 시작하지 않았다(그때 나머지 칸은 모두 null)
  * @param requestedByMemberId 이 회차를 시작한 어드민

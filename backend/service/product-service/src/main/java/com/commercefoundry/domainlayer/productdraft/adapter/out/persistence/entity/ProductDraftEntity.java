@@ -30,8 +30,8 @@ import org.springframework.data.domain.Persistable;
  * <p>{@link Persistable} 로 새 행이면 {@code persist}(INSERT) 한다 — Snowflake 아이디를 직접 넣는 엔티티라 기본 {@code save} 는 merge 로 간다
  * ({@code coding-conventions.md} §9-1). 상태 변경은 읽어 온 관리 엔티티를 {@link #decide} · {@link #recordGeneration} 으로 고치고, {@code @Version} 이 동시 변경을 막는다.
  *
- * <p>생성 회차 칸(#359 PR-B1)은 회차 · 시작한 어드민 · 시각 · 입력 hash · 작업 아이디다. 결과 칸({@code result_json} · {@code failure_code})은 스키마만 먼저 두고
- * 결과 반영(B2)이 쓴다. 적용 기록 칸은 그 기능의 PR 에서 더한다.
+ * <p>생성 회차 칸(#359 PR-B1)은 회차 · 시작한 어드민 · 시각 · 입력 hash · 작업 아이디다. 결과 칸({@code result_json} · {@code failure_code})은 결과 반영(B2)이 쓰고
+ * 새 회차 시작(재생성, B3)이 비운다. 적용 기록 칸은 그 기능의 PR 에서 더한다.
  */
 @Entity
 @Table(
@@ -120,7 +120,10 @@ public class ProductDraftEntity extends BaseEntity implements Persistable<Long> 
         this.rejectedAt = rejectedAt;
     }
 
-    /** 상태 · 생성 회차 칸을 바꾼다. 판정(claim · 작업 연결)은 domain 이 끝냈다. 결과 칸은 건드리지 않는다. */
+    /**
+     * 상태 · 생성 회차 칸을 바꾼다. 판정(claim · 작업 연결)은 domain 이 끝냈다. 결과 칸은 비운다 — claim · 작업 연결 시점의 초안에는 현재 회차 결과가 없고,
+     * 재생성(#359 B3)은 이전 회차의 제안 · 실패 사유를 남기지 않는다.
+     */
     public void recordGeneration(ProductDraftStatus status, int generationNo, Long requestedByMemberId, Instant requestedAt, String inputHash, Long jobId) {
         this.status = status;
         this.generationNo = generationNo;
@@ -128,6 +131,8 @@ public class ProductDraftEntity extends BaseEntity implements Persistable<Long> 
         this.generationRequestedAt = requestedAt;
         this.inputHash = inputHash;
         this.jobId = jobId;
+        this.resultJson = null;
+        this.failureCode = null;
     }
 
     public void recordGenerationResult(ProductDraftStatus status, String resultJson, String failureCode) {

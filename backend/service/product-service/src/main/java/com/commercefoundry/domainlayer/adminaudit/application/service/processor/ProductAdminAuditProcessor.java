@@ -210,6 +210,11 @@ public class ProductAdminAuditProcessor {
         write(ProductAdminAuditAction.PRODUCT_DRAFT_REFRESH, actorMemberId, AdminAuditLog.target(PRODUCT_DRAFT, draftId), succeeded);
     }
 
+    /** 재생성 (#359 B3). 회차 · 작업 아이디 · 입력 hash 는 싣지 않는다 */
+    public void productDraftRegenerated(long actorMemberId, long draftId, boolean succeeded) {
+        write(ProductAdminAuditAction.PRODUCT_DRAFT_REGENERATE, actorMemberId, AdminAuditLog.target(PRODUCT_DRAFT, draftId), succeeded);
+    }
+
     private static void write(ProductAdminAuditAction action, long actorMemberId, String target, boolean succeeded) {
         AdminAuditLog.write(action.name(), actorMemberId, target, succeeded);
     }

@@ -72,7 +72,8 @@ class ProductDraftAdminControllerTest {
 
         @ParameterizedTest(name = "{0} {1}")
         @CsvSource({"POST, /api/v1/admin/product-drafts", "GET, /api/v1/admin/product-drafts/1", "POST, /api/v1/admin/product-drafts/1/reject",
-            "POST, /api/v1/admin/product-drafts/1/generate", "POST, /api/v1/admin/product-drafts/1/refresh"})
+            "POST, /api/v1/admin/product-drafts/1/generate", "POST, /api/v1/admin/product-drafts/1/refresh",
+            "POST, /api/v1/admin/product-drafts/1/regenerate"})
         @DisplayName("CUSTOMER 면 403 · SECURITY_005, 토큰이 없으면 401 · SECURITY_001 이고 유스케이스를 부르지 않는다")
         void onlyAdmin(String method, String uri) {
             SecurityEnvelopeAssertions.assertEnvelope(exchange(HttpMethod.valueOf(method), uri, VALID_BODY, MemberRole.CUSTOMER).getResponse(), SecurityErrorCode.FORBIDDEN);
@@ -222,7 +223,7 @@ class ProductDraftAdminControllerTest {
     class Generate {
 
         @Test
-        @DisplayName("200 이고 시작한 어드민은 토큰의 memberId 다. 응답에 작업 · 회차 · 입력 hash 를 싣지 않는다")
+        @DisplayName("200 이고 시작한 어드민은 토큰의 memberId 다. 응답에 회차 · 재생성 가능 여부는 싣고 작업 · 입력 hash 는 싣지 않는다")
         void generates() {
             given(productDraftAdminUseCase.generate(7L, TestTokens.MEMBER_ID)).willReturn(response());
 
@@ -230,7 +231,8 @@ class ProductDraftAdminControllerTest {
 
             assertThat(result).hasStatusOk();
             assertThat(result).bodyJson().extractingPath("$.dataBody").asMap()
-                .doesNotContainKeys("jobId", "generationNo", "inputHash", "prompt", "model", "token", "cost");
+                .containsEntry("generationNo", 0).containsEntry("regenerationAvailable", false)
+                .doesNotContainKeys("jobId", "inputHash", "prompt", "model", "token", "cost");
         }
 
         @ParameterizedTest(name = "{0} {1}")
@@ -256,6 +258,53 @@ class ProductDraftAdminControllerTest {
             assertThat(exchange(HttpMethod.POST, PATH + "/0/generate", null, MemberRole.ADMIN))
                 .bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("PRODUCT_DRAFT_127");
             verifyNoInteractions(productDraftAdminUseCase);
+        }
+    }
+
+    @Nested
+    @DisplayName("재생성 (#359 B3)")
+    class Regenerate {
+
+        @Test
+        @DisplayName("200 이고 시작한 어드민은 토큰의 memberId, 회차는 본문 generationNo 다")
+        void regenerates() {
+            given(productDraftAdminUseCase.regenerate(7L, TestTokens.MEMBER_ID, 2)).willReturn(response());
+
+            MvcTestResult result = exchange(HttpMethod.POST, PATH + "/7/regenerate", "{\"generationNo\":2}", MemberRole.ADMIN);
+
+            assertThat(result).hasStatusOk();
+            verify(productDraftAdminUseCase).regenerate(7L, TestTokens.MEMBER_ID, 2);
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @CsvSource(delimiter = '|', value = {
+            "{}|PRODUCT_DRAFT_128",
+            "{\"generationNo\":null}|PRODUCT_DRAFT_128",
+            "{\"generationNo\":0}|PRODUCT_DRAFT_129",
+            "{\"generationNo\":4}|PRODUCT_DRAFT_129"
+        })
+        @DisplayName("본문 generationNo 가 없거나 1~3 밖이면 400 · 필드 코드이고 유스케이스를 부르지 않는다")
+        void invalidBody(String body, String code) {
+            MvcTestResult result = exchange(HttpMethod.POST, PATH + "/7/regenerate", body, MemberRole.ADMIN);
+
+            assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+            assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+            verifyNoInteractions(productDraftAdminUseCase);
+        }
+
+        @ParameterizedTest(name = "{0} {1}")
+        @CsvSource(delimiter = '|', value = {
+            "GENERATION_SLOTS_FULL|409|PRODUCT_DRAFT_053|다른 상품 초안 생성이 진행 중입니다. 잠시 뒤 다시 시도해 주세요.",
+            "REGENERATION_EXHAUSTED|409|PRODUCT_DRAFT_054|다시 생성할 수 있는 횟수를 모두 썼습니다. 제안을 직접 고치거나 새 초안을 만들어 주세요.",
+            "REGENERATION_NEW_DRAFT_REQUIRED|409|PRODUCT_DRAFT_055|이 초안으로는 다시 생성할 수 없습니다. 새 초안을 만들어 주세요.",
+            "DRAFT_BUSY|409|PRODUCT_DRAFT_025|다른 변경과 겹쳤습니다. 다시 확인한 뒤 시도해 주세요."
+        })
+        @DisplayName("업무 오류는 도메인 봉투다 — 운영자 문구만 싣는다")
+        void failures(ProductDraftErrorCode errorCode, int status, String code, String message) {
+            given(productDraftAdminUseCase.regenerate(7L, TestTokens.MEMBER_ID, 1)).willThrow(new ProductDraftException(errorCode));
+
+            assertFailure(exchange(HttpMethod.POST, PATH + "/7/regenerate", "{\"generationNo\":1}", MemberRole.ADMIN),
+                HttpStatus.valueOf(status), code, message);
         }
     }
 

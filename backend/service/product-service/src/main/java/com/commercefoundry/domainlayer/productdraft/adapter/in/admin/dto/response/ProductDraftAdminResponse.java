@@ -49,6 +49,12 @@ public record ProductDraftAdminResponse(
     ProductDraftResultAdminItem result,
 
     @Schema(description = "생성 실패 초안의 운영자 안내", nullable = true)
-    String failureNotice
+    String failureNotice,
+
+    @Schema(description = "지금 AI 생성 회차 (0 = 아직 시작 전, 첫 생성 포함 최대 3). 다시 생성할 때 본문 generationNo 로 보낸다", example = "1")
+    int generationNo,
+
+    @Schema(description = "지금 '다시 생성'을 할 수 있는가 — 검토 대기 또는 다시 만들 수 있는 실패이고, 남은 회차가 있고, 보관 기간 안일 때만 true", example = "true")
+    boolean regenerationAvailable
 ) {
 }

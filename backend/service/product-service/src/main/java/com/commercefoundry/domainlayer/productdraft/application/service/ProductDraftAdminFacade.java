@@ -16,10 +16,12 @@ import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraftStatus;
 import com.commercefoundry.global.properties.ProductDraftProperties;
 import java.time.Instant;
+import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.TransactionException;
 import org.springframework.stereotype.Service;
@@ -38,9 +40,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * 응답은 생성 대기 초안이다 — 운영자는 {@code POST /{draftId}/generate} 로 다시 시도한다. claim 은 회차 · 시작한 어드민 · 입력 hash 를 저장하고, 작업 연결 전 실패는
  * 그 claim 을 그대로 둔다 — 재시도가 같은 값으로 등록해 operations 가 같은 영수증을 재생한다(작업이 둘 생기지 않는다).
  *
- * <p>거절 · 생성 시작은 초안 행의 {@code @Version} 으로 동시 변경을 막는다 — 다른 쪽이 먼저 바꿨으면 409 · {@code PRODUCT_DRAFT_025} 다.
+ * <p><b>재생성 (#359 B3)</b> — 생성 시작과 같은 흐름이고 claim 만 다르다({@code ProductDraftGenerationProcessor#claimRegeneration}). 운영자가 보던 회차를 받아
+ * 같은 요청의 재시도가 회차를 두 번 올리지 않는다. 새 회차를 여는 claim(첫 회차 · 재생성)은 매장 전체 동시 생성 3건 게이트를 지난다.
  *
- * <p><b>감사 (#163 PR-C′)</b> — 생성 · 거절 · 생성 시작은 {@link ProductAdminAuditProcessor} 로 {@code product-draft:<id>} 대상 한 줄 남긴다(선례: {@code CategoryAdminFacade}).
+ * <p>거절 · 생성 시작 · 재생성은 초안 행의 {@code @Version} 으로 동시 변경을 막는다 — 다른 쪽이 먼저 바꿨으면 409 · {@code PRODUCT_DRAFT_025} 다.
+ *
+ * <p><b>감사 (#163 PR-C′)</b> — 생성 · 거절 · 생성 시작 · 재생성은 {@link ProductAdminAuditProcessor} 로 {@code product-draft:<id>} 대상 한 줄 남긴다(선례: {@code CategoryAdminFacade}).
  * 생성은 아이디를 받기 전에 실패하면 대상이 {@code -} 다. 생성은 저장 트랜잭션이 끝난 뒤 남기고, 저장 직후 자동 시작은 생성 줄에 포함한다(따로 남기지 않는다).
  * 거절은 트랜잭션 안에서 불러도 줄은 커밋 결과로 남는다(롤백되면 성공으로 부른 것도 {@code FAILURE}). 업무 예외는 기록한 뒤 그대로 다시 던진다.
  * 입력 사실 · 문구 · 이미지 · 생성 결과 · 거절 사유 · 작업 아이디는 싣지 않는다 — 정본은 초안 행이다.
@@ -161,6 +166,25 @@ public class ProductDraftAdminFacade implements ProductDraftAdminUseCase {
         return productDraftAdminPresenter.toResponse(started, productDraftProcessor.now());
     }
 
+    @Override
+    public ProductDraftAdminResponse regenerate(long draftId, long memberId, int generationNo) {
+        ProductDraft started;
+        try {
+            if (!productDraftProperties.generationEnabled()) {
+                throw new ProductDraftException(ProductDraftErrorCode.GENERATION_START_DISABLED);
+            }
+            if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                throw new ProductDraftException(ProductDraftErrorCode.GENERATION_UNAVAILABLE);
+            }
+            started = start(() -> productDraftGenerationProcessor.claimRegeneration(draftId, memberId, generationNo));
+        } catch (RuntimeException exception) {
+            productAdminAuditProcessor.productDraftRegenerated(memberId, draftId, false);
+            throw exception;
+        }
+        productAdminAuditProcessor.productDraftRegenerated(memberId, draftId, true);
+        return productDraftAdminPresenter.toResponse(started, productDraftProcessor.now());
+    }
+
     /** 낙관적 락 충돌은 409 {@code PRODUCT_DRAFT_025} 로 바꾼다 — 감사 try 안에서 불러 바꾼 예외도 {@code FAILURE} 로 남는다. */
     private ProductDraftAdminResponse rejectOrBusy(long draftId, long memberId) {
         Instant now = productDraftProcessor.now();
@@ -183,12 +207,18 @@ public class ProductDraftAdminFacade implements ProductDraftAdminUseCase {
         return created;
     }
 
-    /** claim(짧은 쓰기) → 생성 중이면 그대로 → 등록(트랜잭션 밖) → 작업 연결(짧은 쓰기). */
     private ProductDraft start(long draftId, long memberId) {
+        return start(() -> productDraftGenerationProcessor.claim(draftId, memberId));
+    }
+
+    /**
+     * claim(짧은 쓰기) → 생성 중이면 그대로 → 등록(트랜잭션 밖) → 작업 연결(짧은 쓰기). 초안 행의 낙관적 락 충돌과 게이트 행 잠금 대기 초과는 409 {@code 025} 다.
+     */
+    private ProductDraft start(Supplier<ProductDraft> claim) {
         ProductDraft claimed;
         try {
-            claimed = productDraftGenerationProcessor.claim(draftId, memberId);
-        } catch (ObjectOptimisticLockingFailureException exception) {
+            claimed = claim.get();
+        } catch (ObjectOptimisticLockingFailureException | PessimisticLockingFailureException exception) {
             throw new ProductDraftException(ProductDraftErrorCode.DRAFT_BUSY, exception);
         }
         if (!claimed.awaitingGenerationJob()) {

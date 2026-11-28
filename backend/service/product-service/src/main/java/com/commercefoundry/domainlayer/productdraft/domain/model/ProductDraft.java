@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * AI 상품 등록 초안 (#359). 운영자 입력(사실 · 이미지)을 담고, 검토한 값만 상품 등록으로 적용한다 — 초안이 상품을 직접 바꾸거나 공개하지 않는다.
@@ -34,6 +35,15 @@ public record ProductDraft(
 
     public static final String GENERATION_CANCELLED = "GENERATION_CANCELLED";
     public static final String GENERATION_RESULT_EXPIRED = "GENERATION_RESULT_EXPIRED";
+
+    /**
+     * 같은 입력으로 다시 생성해도 결과가 달라지지 않는 실패 — 새 초안이 필요하다(#359 B3). 이미지가 바뀌었거나 입력 · 결과 보관이 끝났거나 입력 자체가 거절됐다.
+     * 그 밖의 실패(AI 오류 · 시간 초과 · 취소 · 한도 초과 등)는 남은 회차로 다시 생성할 수 있다.
+     */
+    private static final Set<String> NEW_DRAFT_REQUIRED_FAILURES = Set.of(
+        "PRODUCT_DRAFT_IMAGE_CHANGED", "PRODUCT_DRAFT_INPUT_EXPIRED", GENERATION_RESULT_EXPIRED,
+        "PRODUCT_DRAFT_INPUT_REJECTED", "PRODUCT_DRAFT_INPUT_MISMATCH", "PRODUCT_DRAFT_INPUT_INVALID", "PRODUCT_DRAFT_IMAGES_TOO_LARGE"
+    );
 
     public ProductDraft {
         Objects.requireNonNull(status, "status");
@@ -75,16 +85,21 @@ public record ProductDraft(
     }
 
     /**
-     * 생성 회차 시작(claim) — 생성 대기({@code REQUESTED}) · 회차 0 · 기간 안 · 이미지 원본 고정 완료인 초안만 된다. 회차가 하나 오르고 요청자 · 시각 · 입력 hash 를 고정한다.
-     * 상태는 그대로 {@code REQUESTED} 이고 작업은 등록 응답을 반영할 때({@link #bindJob}) 붙는다. 생성 중({@code GENERATING})에서는 막는다 — 이전 회차가 끝나기 전에
+     * 생성 회차 시작(claim) — 기간 안 · 이미지 원본 고정 완료이고, 아래 둘 중 하나인 초안만 된다. 회차가 하나 오르고 요청자 · 시각 · 입력 hash 를 고정한다.
+     * <ul>
+     *   <li>첫 회차: 생성 대기({@code REQUESTED}) · 회차 0</li>
+     *   <li>재생성(#359 B3): {@link #regenerationAvailableAt} — 검토 대기({@code READY}) 또는 다시 생성할 수 있는 실패({@code FAILED}) · 남은 회차 있음.
+     *       이전 회차의 제안 · 실패 사유는 지운다</li>
+     * </ul>
+     * 상태는 {@code REQUESTED} 가 되고 작업은 등록 응답을 반영할 때({@link #bindJob}) 붙는다. 생성 중({@code GENERATING})에서는 막는다 — 이전 회차가 끝나기 전에
      * 다음 회차를 등록하면 AI 를 두 번 부를 수 있다. 판정은 호출한 쪽이 업무 오류로 먼저 한다.
      *
      * @param claimedAt 시작 시각 — DB 정밀도(마이크로초)로 자른 값
      * @throws IllegalStateException 시작할 수 없는 초안
      */
     public ProductDraft claimGeneration(long actorMemberId, String inputHash, Instant claimedAt) {
-        // B1 은 첫 회차만 연다. 재생성(B3)은 READY · FAILED 에서 REQUESTED 로 되돌리며 다음 회차를 여는 분기를 여기 더한다.
-        if (statusAt(claimedAt) != ProductDraftStatus.REQUESTED || generation.claimed()) {
+        boolean first = statusAt(claimedAt) == ProductDraftStatus.REQUESTED && !generation.claimed();
+        if (!first && !regenerationAvailableAt(claimedAt)) {
             throw new IllegalStateException("생성을 시작할 수 없는 초안 상태입니다: " + statusAt(claimedAt) + ", generationNo=" + generation.generationNo());
         }
         if (!imagesPinned()) {
@@ -92,6 +107,21 @@ public record ProductDraft(
         }
         Objects.requireNonNull(inputHash, "inputHash");
         return withGeneration(ProductDraftStatus.REQUESTED, generation.next(actorMemberId, claimedAt, inputHash));
+    }
+
+    /**
+     * 지금 다시 생성할 수 있는가(#359 B3) — 기간 안의 검토 대기({@code READY}) 또는 다시 생성할 수 있는 실패({@code FAILED})이고 회차가 상한보다 작다.
+     * 실패한 회차도 횟수에 든다. 새 초안이 필요한 실패({@link #requiresNewDraft})는 같은 입력으로 다시 생성해도 결과가 같아 막는다.
+     */
+    public boolean regenerationAvailableAt(Instant now) {
+        ProductDraftStatus current = statusAt(now);
+        boolean finished = current == ProductDraftStatus.READY || (current == ProductDraftStatus.FAILED && !requiresNewDraft());
+        return finished && generation.claimed() && generation.generationNo() < ProductDraftGeneration.MAX_GENERATION_NO;
+    }
+
+    /** 실패 사유가 새 초안을 요구하는가 — 이미지 변경 · 입력 · 결과 보관 만료 · 입력 거절. */
+    public boolean requiresNewDraft() {
+        return failureCode != null && NEW_DRAFT_REQUIRED_FAILURES.contains(failureCode);
     }
 
     /**

@@ -88,5 +88,7 @@ public enum ProductAdminAuditAction {
     /** AI 상품 초안 생성 시작 · 재시도 (#359 PR-B1). 대상 {@code product-draft:<id>} — 이미 생성 중이라 그대로 200 인 재전송도 {@code SUCCESS}. 회차 · 작업은 싣지 않는다 */
     PRODUCT_DRAFT_GENERATE,
     /** AI 상품 초안 생성 결과 확인. 대상은 초안 아이디다. */
-    PRODUCT_DRAFT_REFRESH
+    PRODUCT_DRAFT_REFRESH,
+    /** AI 상품 초안 재생성 (#359 B3). 대상 {@code product-draft:<id>} — 이미 다음 회차를 시작해 그대로 200 인 재전송도 {@code SUCCESS}. 회차 · 작업은 싣지 않는다 */
+    PRODUCT_DRAFT_REGENERATE
 }

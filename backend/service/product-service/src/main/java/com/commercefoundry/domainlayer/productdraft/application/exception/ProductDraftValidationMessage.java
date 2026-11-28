@@ -51,6 +51,10 @@ public final class ProductDraftValidationMessage {
     // 경로 변수 (/api/v1/admin/product-drafts/{draftId})
     public static final String DRAFT_ID_POSITIVE = "PRODUCT_DRAFT_127:draftId 는 양수여야 합니다.";
 
+    // 재생성 본문 (POST /api/v1/admin/product-drafts/{draftId}/regenerate, #359 B3)
+    public static final String GENERATION_NO_REQUIRED = "PRODUCT_DRAFT_128:generationNo 는 필수입니다.";
+    public static final String GENERATION_NO_RANGE = "PRODUCT_DRAFT_129:generationNo 는 1~3 이어야 합니다.";
+
     private ProductDraftValidationMessage() {
     }
 }
