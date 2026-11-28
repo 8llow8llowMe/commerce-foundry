@@ -6,15 +6,17 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.LongSupplier;
-import java.util.stream.IntStream;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
@@ -23,6 +25,8 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>취소 클레임의 수명은 {@code REQUESTED}(환불 대기) → {@code REFUNDED}(재고 복원 대기) → {@code COMPLETED} 이고, 종결 실패는
  * {@code REFUND_FAILED} · {@code RESTORATION_FAILED} 다. 상태는 아래 도메인 메서드로만 바꾼다. 환불 · 복원 호출은 이 클레임 아이디를 멱등 키로 쓴다.
+ * 결제 후 부분 취소(#684)는 한 주문에 취소 클레임을 여럿 둔다 — 항목별 취소 수량은 거절 밖 취소 클레임의 항목 합({@link #reservesCancellationQuantity()})이고,
+ * 주문 정리는 환불이 기록된 취소({@link #isSettledCancellation()})만 센다. 주문당 열린 취소({@link #isOpenCancellation()})는 하나다(주문 잠금 · 상태 전이가 보장한다).
  *
  * <p>반품 클레임의 수명 (#17 B1 저장 기반) — {@code REQUESTED}(접수 · 검수 대기) → 운영자 승인 {@code APPROVED}(환불 대기) 또는 거절 {@code REJECTED}(끝).
  * 결정 대기 판정은 {@link #isAwaitingReturnDecision()}, 승인 기록은 운영자가 고른 귀책을 함께 저장하고 거절은 운영자 결정을 싣는다(#17 B2c).
@@ -62,7 +66,8 @@ public record Claim(
      */
     public static final String REFUND_BLOCKED_CODE = "PAYMENT_016";
 
-    private static final Set<Status> RETURN_QUANTITY_RESERVING_STATUSES = Collections.unmodifiableSet(EnumSet.complementOf(EnumSet.of(Status.REJECTED)));
+    /** 수량을 잡아 두는 상태 — 거절(REJECTED)만 뺀 전부다. 반품 · 취소가 같은 집합을 쓴다. */
+    private static final Set<Status> QUANTITY_RESERVING_STATUSES = Collections.unmodifiableSet(EnumSet.complementOf(EnumSet.of(Status.REJECTED)));
 
     public Claim {
         if (id <= 0 || orderId <= 0 || (version != null && version < 0) || (paymentId != null && paymentId <= 0) || attemptCount < 0) {
@@ -160,8 +165,16 @@ public record Claim(
     }
 
     /**
-     * 결제 후 고객 전체 취소 클레임 (#16 PR-2) — 주문의 전 항목 · 전 수량을 환불 대기(REQUESTED)로 접수한다. 항목 수량은 복원할 SKU 수량이자
-     * 부분 취소의 "이미 취소된 수량" 근거다. 주문 상태 판정(PAID · MAKING · PREPARING)은 부르는 쪽이 먼저 한다.
+     * 결정적 전체 취소 키인가 (#684) — 부분 취소 접수는 고객 멱등 키가 이 값이면 받지 않는다. 받으면 같은 주문의 전체 취소 클레임과 같은 행
+     * ({@code uk_claim_order_id_request_key})을 가리켜, 전체 취소 재요청이 부분 취소 클레임을 "이미 접수된 전체 취소"로 읽는다.
+     */
+    public static boolean isReservedCancellationKey(long orderId, UUID requestKey) {
+        return cancellationRequestKey(orderId).equals(requestKey);
+    }
+
+    /**
+     * 결제 후 고객 전체 취소 클레임 (#16 PR-2) — 주문의 전 항목 · 전 수량을 결정적 키로 환불 대기(REQUESTED)로 접수한다. 항목 수량은 복원할 SKU 수량이자
+     * 부분 취소의 "이미 취소된 수량" 근거다. 주문 상태 판정(PAID · MAKING · PREPARING)은 부르는 쪽이 먼저 한다. 항목별 수량 팩토리에 위임한다.
      *
      * @param refund 환불액 — {@link CancellationRefundPolicy} 로 계산한 값. 0보다 크고 주문 총액 이하, 주문 통화
      * @param now 접수 시각
@@ -172,6 +185,32 @@ public record Claim(
         long id, Order order, long paymentId, Money refund, OrderCancelReason reason, LongSupplier itemIdGenerator, Instant now, Duration lease
     ) {
         Objects.requireNonNull(order, "order");
+        Map<Long, Integer> all = new HashMap<>();
+        for (int index = 0; index < order.itemIds().size(); index++) {
+            all.put(order.itemIds().get(index), order.quote().lines().get(index).quantity());
+        }
+        return requestCancellation(id, order, cancellationRequestKey(order.id()), all, paymentId, refund, reason, itemIdGenerator, now, lease);
+    }
+
+    /**
+     * 결제 후 고객 취소 클레임 — 항목별 수량 (#684, 부분 취소 포함). {@code quantities} 의 항목 · 수량을 환불 대기(REQUESTED)로 접수한다. 0 수량 줄은 빼고,
+     * 항목 아이디는 주문 줄 순서로 발급한다. 이 팩토리는 한 줄의 수량이 그 줄의 주문 수량을 넘는지만 본다 — 누적 취소 수량(이미 취소에 잡힌 수량 + 이번 수량 ≤ 주문 수량) ·
+     * 환불액({@link CancellationRefundPolicy#breakdown}) · 0 이하 환불 거절 · 주문 상태 판정은 부르는 쪽이 같은 주문 잠금 안에서 먼저 한다.
+     *
+     * @param requestKey 요청 키 — 부분 취소는 고객 멱등 키다. 결정적 전체 취소 키는 부르는 쪽이 {@link #isReservedCancellationKey} 로 거른다
+     * @param quantities 주문 항목 아이디 → 취소 수량(0 이상). 0 은 뺀다
+     * @param refund 환불액 — {@link CancellationRefundPolicy} 로 계산한 값. 0보다 크고 주문 총액 이하, 주문 통화
+     * @param lease 접수한 요청이 직접 환불을 끝낼 시간 — 다음 시도 시각은 {@code now + lease} 다(전체 취소와 같다)
+     * @throws IllegalArgumentException 저장 전 주문 · 다른 통화 · 총액을 넘는 · 0 인 환불액 · 0 이하 lease · 주문에 없는 항목 · 음수 수량 · 줄의 주문 수량 초과 ·
+     *     0 아닌 수량이 하나도 없음
+     */
+    public static Claim requestCancellation(
+        long id, Order order, UUID requestKey, Map<Long, Integer> quantities, long paymentId, Money refund, OrderCancelReason reason,
+        LongSupplier itemIdGenerator, Instant now, Duration lease
+    ) {
+        Objects.requireNonNull(order, "order");
+        Objects.requireNonNull(requestKey, "requestKey");
+        Objects.requireNonNull(quantities, "quantities");
         Objects.requireNonNull(refund, "refund");
         Objects.requireNonNull(now, "now");
         Objects.requireNonNull(lease, "lease");
@@ -183,10 +222,30 @@ public record Claim(
         if (order.isNew() || refund.currency() != order.quote().currency() || refund.isGreaterThan(order.quote().totalAmount())) {
             throw new IllegalArgumentException("취소 클레임은 저장된 주문에서 주문 통화 · 총액 이하 환불액으로 만듭니다: orderId=" + order.id());
         }
+        quantities.forEach((orderItemId, quantity) -> {
+            if (orderItemId == null || !order.itemIds().contains(orderItemId)) {
+                throw new IllegalArgumentException("주문에 없는 항목은 취소할 수 없습니다: orderId=%d, orderItemId=%s".formatted(order.id(), orderItemId));
+            }
+            if (quantity == null || quantity < 0) {
+                throw new IllegalArgumentException("취소 수량은 0 이상이어야 합니다: orderItemId=" + orderItemId);
+            }
+        });
         List<OrderQuoteLine> lines = order.quote().lines();
-        List<ClaimItem> items = IntStream.range(0, lines.size())
-            .mapToObj(index -> new ClaimItem(itemIdGenerator.getAsLong(), order.itemIds().get(index), lines.get(index).quantity(), itemReason)).toList();
-        return new Claim(id, order.id(), cancellationRequestKey(order.id()), Type.CANCELLATION, Status.REQUESTED, refund, paymentId, 0,
+        List<ClaimItem> items = new ArrayList<>();
+        for (int index = 0; index < lines.size(); index++) {
+            long orderItemId = order.itemIds().get(index);
+            int quantity = quantities.getOrDefault(orderItemId, 0);
+            if (quantity > lines.get(index).quantity()) {
+                throw new IllegalArgumentException("취소 수량이 주문 수량을 넘습니다: orderItemId=%d, %d > %d".formatted(orderItemId, quantity, lines.get(index).quantity()));
+            }
+            if (quantity > 0) {
+                items.add(new ClaimItem(itemIdGenerator.getAsLong(), orderItemId, quantity, itemReason));
+            }
+        }
+        if (items.isEmpty()) {
+            throw new IllegalArgumentException("취소할 수량이 없습니다: orderId=" + order.id());
+        }
+        return new Claim(id, order.id(), requestKey, Type.CANCELLATION, Status.REQUESTED, refund, paymentId, 0,
             nextAttemptAt.truncatedTo(ChronoUnit.MICROS), null, items, null, null);
     }
 
@@ -227,7 +286,33 @@ public record Claim(
 
     /** 반품 수량을 잡아 두는 상태 — 거절(REJECTED)만 뺀 전부다. 영속 어댑터의 수량 합산이 이 집합을 그대로 쓴다 (#17 B1). */
     public static Set<Status> returnQuantityReservingStatuses() {
-        return RETURN_QUANTITY_RESERVING_STATUSES;
+        return QUANTITY_RESERVING_STATUSES;
+    }
+
+    /** 취소 수량을 잡는 상태 — 거절(REJECTED)만 뺀 전부다(반품과 같은 집합). 영속 어댑터의 취소 수량 합산이 이 집합을 그대로 쓴다 (#684). */
+    public static Set<Status> cancellationQuantityReservingStatuses() {
+        return QUANTITY_RESERVING_STATUSES;
+    }
+
+    /**
+     * 이 취소가 "이미 취소에 잡힌 수량"에 들어가는가 (#684) — 거절만 빠진다. 열린 취소(환불 대기 · 환불 실패)는 환불이 나갈 수 있고 복원 실패는 환불이 이미 나갔다 —
+     * 빼면 같은 수량을 다시 취소 접수해 이중 환불이 된다. {@link #isSettledCancellation()} 또는 {@link #isOpenCancellation()} 과 같다. 반품 클레임은 아니다.
+     */
+    public boolean reservesCancellationQuantity() {
+        return type == Type.CANCELLATION && QUANTITY_RESERVING_STATUSES.contains(status);
+    }
+
+    /** 환불이 기록된 취소인가 (#684) — REFUNDED · RESTORATION_FAILED · COMPLETED. 취소 정리({@link CancellationRefundPolicy#outcome})가 이것만 센다. */
+    public boolean isSettledCancellation() {
+        return type == Type.CANCELLATION && hasRecordedRefund();
+    }
+
+    /**
+     * 아직 끝나지 않은 취소인가 (#684) — 환불 대기(REQUESTED) · 환불 실패(REFUND_FAILED). 하나라도 있으면 주문은 취소 요청에 머물고 출고하지 않는다.
+     * 환불 실패는 취소 거절 전이(A4)가 없어 운영자 수동 확정 · 재시도로만 끝난다.
+     */
+    public boolean isOpenCancellation() {
+        return type == Type.CANCELLATION && (status == Status.REQUESTED || status == Status.REFUND_FAILED);
     }
 
     /**
@@ -235,7 +320,7 @@ public record Claim(
      * 빼면 같은 수량을 다시 접수해 이중 환불이 된다. {@link #isSettledReturn()} 또는 {@link #isOpenReturn()} 과 같다. 취소 클레임은 아니다.
      */
     public boolean reservesReturnQuantity() {
-        return type == Type.RETURN && RETURN_QUANTITY_RESERVING_STATUSES.contains(status);
+        return type == Type.RETURN && QUANTITY_RESERVING_STATUSES.contains(status);
     }
 
     /** 환불이 기록된(정산된) 반품인가 — REFUNDED · RESTORATION_FAILED · COMPLETED. 반품 환불 산식의 "이미 정산한 반품"과 반품 완료 판정이 이것만 센다. */

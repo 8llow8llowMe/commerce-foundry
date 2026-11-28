@@ -28,11 +28,14 @@ import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderCancelReason;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.shared.commerce.CurrencyCode;
+import com.commercefoundry.shared.commerce.Money;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -96,6 +99,41 @@ public abstract class ClaimCancellationPersistenceContract {
         return new Claim(claim.id(), claim.orderId(), claim.requestKey(), claim.type(), claim.status(), claim.expectedRefund(), claim.paymentId(),
             claim.attemptCount(), claim.nextAttemptAt(), claim.failureCode(), new Claim.Decision(reason, 7, NOW.plusNanos(123_456_789), "PAYMENT_016"),
             claim.items(), claim.requestedAt(), claim.version());
+    }
+
+    /** 고객 멱등 키로 접수한 부분 취소 (#684) — 환불액은 정책 내역 그대로다. */
+    private Claim newPartialCancellation(Order order, Map<Long, Integer> alreadyCanceled, Map<Long, Integer> quantities) {
+        Money refund = CancellationRefundPolicy.breakdown(order, alreadyCanceled, quantities).toRefund().toMoney();
+        return Claim.requestCancellation(IDS.incrementAndGet(), order, UUID.randomUUID(), quantities, 77L, refund, OrderCancelReason.ORDER_MISTAKE,
+            IDS::incrementAndGet, NOW, LEASE);
+    }
+
+    @Test
+    void canceledQuantitiesSumNonRejectedCancellationsPerItemAndByOrderIds() {
+        Order partial = paidOrder();
+        long a = partial.itemIds().get(0);
+        long b = partial.itemIds().get(1);
+        Claim first = insert(newPartialCancellation(partial, Map.of(), Map.of(a, 1)));
+        update(first.markRefunded(NOW));
+        insert(newPartialCancellation(partial, Map.of(a, 1), Map.of(b, 1)));
+        insert(new Claim(IDS.incrementAndGet(), partial.id(), UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.REJECTED, Money.of(10_000, CurrencyCode.KRW),
+            77L, 0, null, null, List.of(new ClaimItem(IDS.incrementAndGet(), a, 1, ClaimItem.Reason.OTHER)), null, null));
+        insert(new Claim(IDS.incrementAndGet(), partial.id(), UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
+            List.of(new ClaimItem(IDS.incrementAndGet(), a, 2, ClaimItem.Reason.CHANGE_OF_MIND)), null, null));
+        Order full = paidOrder();
+        insert(newCancellation(full, NOW));
+        Order untouched = paidOrder();
+
+        assertThat(claims.sumCanceledQuantities(partial.id())).as("거절 · 반품 제외, 환불 기록 + 열린 취소").isEqualTo(Map.of(a, 1L, b, 1L));
+        assertThat(claims.sumCanceledQuantities(full.id())).isEqualTo(Map.of(full.itemIds().get(0), 2L, full.itemIds().get(1), 1L));
+        assertThat(claims.sumCanceledQuantities(untouched.id())).isEmpty();
+        assertThat(claims.sumRequestedReturnQuantities(partial.id())).as("반품 합은 그대로").isEqualTo(Map.of(a, 2L));
+        assertThat(claims.sumCanceledQuantitiesByOrderIds(List.of(partial.id(), full.id(), untouched.id(), partial.id()))).isEqualTo(Map.of(
+            partial.id(), Map.of(a, 1L, b, 1L),
+            full.id(), Map.of(full.itemIds().get(0), 2L, full.itemIds().get(1), 1L)));
+        assertThat(claims.sumCanceledQuantitiesByOrderIds(List.of())).isEmpty();
+        assertThat(CancellationRefundPolicy.outcome(partial, claims.findAllByOrderId(partial.id()))).as("열린 부분 취소가 남아 취소 요청 유지")
+            .isEqualTo(CancellationRefundPolicy.CancellationOutcome.STILL_REQUESTED);
     }
 
     @Test

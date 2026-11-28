@@ -8,6 +8,7 @@ import static com.commercefoundry.domainlayer.order.support.OrderFixtures.quoteL
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.commercefoundry.domainlayer.order.domain.model.CancellationRefundPolicy.CancellationOutcome;
 import com.commercefoundry.domainlayer.order.domain.model.ReturnRefundPolicy.ReturnOutcome;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -436,6 +437,91 @@ class OrderTest {
         }
         assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, preparing)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, requested.completeCancellation())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("취소 정리 — 정책 결과(CancellationOutcome)만 받아 취소 요청에서 취소 완료 · 결제 완료로만 가고 나머지 값은 그대로다. 이미 그 상태면 그대로다 (#684)")
+    void settleCancellation() {
+        Order requested = withStatus(OrderStatus.PAID).requestCancellation();
+
+        Order canceled = requested.settleCancellation(CancellationOutcome.CANCELED);
+        Order paid = requested.settleCancellation(CancellationOutcome.PARTIALLY_CANCELED);
+
+        assertThat(canceled.status()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(paid.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(paid).usingRecursiveComparison().ignoringFields("status").isEqualTo(requested);
+        assertThat(requested.settleCancellation(CancellationOutcome.STILL_REQUESTED)).as("열린 취소가 남으면 그대로").isSameAs(requested);
+        assertThat(canceled.settleCancellation(CancellationOutcome.CANCELED)).as("확정 반영 재시도").isSameAs(canceled);
+        assertThat(canceled.completeCancellation()).as("전체 취소 완료와 같은 멱등").isSameAs(canceled);
+        assertThat(paid.settleCancellation(CancellationOutcome.PARTIALLY_CANCELED)).isSameAs(paid);
+        assertThatThrownBy(() -> canceled.settleCancellation(CancellationOutcome.PARTIALLY_CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> paid.settleCancellation(CancellationOutcome.CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> paid.settleCancellation(CancellationOutcome.STILL_REQUESTED)).as("결제 완료에서 취소 요청으로 되돌리지 않는다")
+            .isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> requested.settleCancellation(null)).isInstanceOf(NullPointerException.class);
+        Order unsaved = new Order(requested.id(), requested.memberId(), OrderStatus.CANCEL_REQUESTED, requested.quote(), requested.itemIds(),
+            requested.shippingAddress(), requested.stockReservationId(), requested.paymentDueAt(), null, null, null, null);
+        assertThatThrownBy(() -> unsaved.settleCancellation(CancellationOutcome.PARTIALLY_CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> unsaved.settleCancellation(CancellationOutcome.CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = "CANCEL_REQUESTED")
+    @DisplayName("취소 요청이 아닌 주문의 취소 정리는 도메인 전이 예외다 — 이미 목표 상태인 재시도만 그대로다 (#684)")
+    void settleCancellationRejectedOutsideCancelRequested(OrderStatus status) {
+        Order order = withStatus(status);
+
+        for (CancellationOutcome outcome : CancellationOutcome.values()) {
+            if (outcome.getOrderStatus() == status) {
+                assertThat(order.settleCancellation(outcome)).as(outcome.name()).isSameAs(order);
+                continue;
+            }
+            assertThatThrownBy(() -> order.settleCancellation(outcome)).as(outcome.name())
+                .isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+                    assertThat(exception.getCurrentStatus()).isEqualTo(status);
+                    assertThat(exception.getTargetStatus()).isEqualTo(outcome.getOrderStatus());
+                });
+        }
+    }
+
+    @Test
+    @DisplayName("취소 요청 → 결제 완료는 취소 정리만 한다 — 일반 상태 변경 · 결제 완료 반영(markPaid)은 거절한다 (#684)")
+    void paidFromCancelRequestedOnlyBySettlement() {
+        Order requested = withStatus(OrderStatus.PREPARING).requestCancellation();
+
+        assertThat(OrderStatus.CANCEL_REQUESTED.canTransitionTo(OrderStatus.PAID)).isTrue();
+        assertThatThrownBy(() -> requested.changeStatus(OrderStatus.PAID)).isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+            assertThat(exception.getCurrentStatus()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+            assertThat(exception.getTargetStatus()).isEqualTo(OrderStatus.PAID);
+        });
+        assertThatThrownBy(() -> requested.markPaid(99L)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThat(AdminStatusChangePolicy.decide(requested, OrderStatus.PAID)).isEqualTo(AdminStatusChangePolicy.Decision.NOT_MANUAL);
+    }
+
+    @Test
+    @DisplayName("취소 정리 이력은 SERVICE · 아이디 없음 — 취소 완료면 CANCELLATION_REFUNDED, 결제 완료 복귀면 PARTIAL_CANCELLATION_REFUNDED 다 (#684)")
+    void cancellationSettlementHistories() {
+        Order requested = withStatus(OrderStatus.PAID).requestCancellation();
+        Order paid = requested.settleCancellation(CancellationOutcome.PARTIALLY_CANCELED);
+        Order canceled = requested.settleCancellation(CancellationOutcome.CANCELED);
+
+        OrderStatusHistory partial = OrderStatusHistory.cancellationSettled(11L, requested, paid);
+        OrderStatusHistory full = OrderStatusHistory.cancellationSettled(12L, requested, canceled);
+
+        assertThat(List.<Object>of(partial.fromStatus(), partial.toStatus(), partial.changedByType(), partial.reason()))
+            .containsExactly(OrderStatus.CANCEL_REQUESTED, OrderStatus.PAID, StatusChangedBy.SERVICE, OrderStatusHistory.PARTIAL_CANCELLATION_REFUNDED);
+        assertThat(partial.changedById()).isNull();
+        assertThat(partial.reason()).hasSizeLessThanOrEqualTo(200);
+        assertThat(full).as("전체 취소 완료 이력과 같다").isEqualTo(OrderStatusHistory.cancellationRefunded(12L, requested));
+        assertThatThrownBy(() -> OrderStatusHistory.cancellationSettled(13L, requested, requested)).as("상태 그대로").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OrderStatusHistory.cancellationSettled(13L, paid, paid.requestCancellation())).as("취소 요청에서 출발하지 않음")
+            .isInstanceOf(IllegalArgumentException.class);
+        Order other = new Order(2L, requested.memberId(), OrderStatus.PAID, requested.quote(), List.of(91L, 92L), requested.shippingAddress(),
+            requested.stockReservationId(), requested.paymentDueAt(), null, null, Instant.EPOCH, 3L);
+        assertThatThrownBy(() -> OrderStatusHistory.cancellationSettled(13L, requested, other)).as("다른 주문").isInstanceOf(IllegalArgumentException.class);
+        Order unsaved = new Order(requested.id(), requested.memberId(), OrderStatus.CANCEL_REQUESTED, requested.quote(), requested.itemIds(),
+            requested.shippingAddress(), requested.stockReservationId(), requested.paymentDueAt(), null, null, null, null);
+        assertThatThrownBy(() -> OrderStatusHistory.cancellationSettled(13L, unsaved, paid)).as("저장 전").isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

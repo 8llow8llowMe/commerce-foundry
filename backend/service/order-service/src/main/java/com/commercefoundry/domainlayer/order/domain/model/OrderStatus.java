@@ -22,7 +22,7 @@ import lombok.RequiredArgsConstructor;
  *   <tr><td>PREPARING</td><td>SHIPPING · CANCEL_REQUESTED</td></tr>
  *   <tr><td>SHIPPING</td><td>DELIVERED</td></tr>
  *   <tr><td>DELIVERED</td><td>PURCHASE_CONFIRMED · RETURN_REQUESTED</td></tr>
- *   <tr><td>CANCEL_REQUESTED</td><td>CANCELED</td></tr>
+ *   <tr><td>CANCEL_REQUESTED</td><td>CANCELED · PAID — 취소 정리({@link Order#settleCancellation}): 전량 환불이면 취소 완료, 열린 취소 없이 일부만이면 결제 완료로 (#684)</td></tr>
  *   <tr><td>RETURN_REQUESTED</td><td>RETURNED · DELIVERED — 반품 정리({@link Order#settleReturn}): 전량 환불이면 반품 완료, 열린 반품 없이 일부만이면 배송 완료로 (#17 B1)</td></tr>
  * </table>
  */
@@ -69,6 +69,14 @@ public enum OrderStatus implements CodeNameDescribable {
         };
     }
 
+    /**
+     * 고객 부분 취소를 접수할 수 있는 상태인가 (#684) — 결제 완료만이다. 제작 중 · 상품 준비중은 전체 취소만 받는다(상품 준비중은 피킹 묶음이 수량을 스냅숏한다).
+     * 운영 게이트(부분 취소 플래그 · 결제 후 취소 재시도 스케줄러)는 부르는 쪽이 따로 본다.
+     */
+    public boolean acceptsPartialCancellation() {
+        return this == PAID;
+    }
+
     /** 이 상태에서 갈 수 있는 상태 — 바꿀 수 없다. */
     public Set<OrderStatus> nextStatuses() {
         return TRANSITIONS.get(this);
@@ -86,7 +94,7 @@ public enum OrderStatus implements CodeNameDescribable {
         table.put(PREPARING, Collections.unmodifiableSet(EnumSet.of(SHIPPING, CANCEL_REQUESTED)));
         table.put(SHIPPING, Collections.unmodifiableSet(EnumSet.of(DELIVERED)));
         table.put(DELIVERED, Collections.unmodifiableSet(EnumSet.of(PURCHASE_CONFIRMED, RETURN_REQUESTED)));
-        table.put(CANCEL_REQUESTED, Collections.unmodifiableSet(EnumSet.of(CANCELED)));
+        table.put(CANCEL_REQUESTED, Collections.unmodifiableSet(EnumSet.of(CANCELED, PAID)));
         table.put(RETURN_REQUESTED, Collections.unmodifiableSet(EnumSet.of(RETURNED, DELIVERED)));
         return Collections.unmodifiableMap(table);
     }

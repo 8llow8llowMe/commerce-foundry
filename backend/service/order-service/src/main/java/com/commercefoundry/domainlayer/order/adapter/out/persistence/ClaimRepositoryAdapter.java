@@ -7,16 +7,19 @@ import com.commercefoundry.domainlayer.order.adapter.out.persistence.repository.
 import com.commercefoundry.domainlayer.order.application.exception.ClaimRequestKeyConflictException;
 import com.commercefoundry.domainlayer.order.application.mapper.ClaimMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
-import com.commercefoundry.domainlayer.order.application.port.out.query.RequestedReturnQuantityQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderItemClaimQuantityQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.OrderItemQuantityQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import com.commercefoundry.persistence.util.ConstraintViolations;
@@ -61,7 +64,23 @@ public class ClaimRepositoryAdapter implements ClaimRepositoryPort {
     @Override
     public Map<Long, Long> sumRequestedReturnQuantities(long orderId) {
         return claimRepository.sumQuantities(orderId, Claim.Type.RETURN, Claim.returnQuantityReservingStatuses()).stream()
-            .collect(Collectors.toMap(RequestedReturnQuantityQueryResult::orderItemId, RequestedReturnQuantityQueryResult::quantity));
+            .collect(Collectors.toMap(OrderItemQuantityQueryResult::orderItemId, OrderItemQuantityQueryResult::quantity));
+    }
+
+    @Override
+    public Map<Long, Long> sumCanceledQuantities(long orderId) {
+        return claimRepository.sumQuantities(orderId, Claim.Type.CANCELLATION, Claim.cancellationQuantityReservingStatuses()).stream()
+            .collect(Collectors.toMap(OrderItemQuantityQueryResult::orderItemId, OrderItemQuantityQueryResult::quantity));
+    }
+
+    @Override
+    public Map<Long, Map<Long, Long>> sumCanceledQuantitiesByOrderIds(Collection<Long> orderIds) {
+        if (orderIds.isEmpty()) {
+            return Map.of();
+        }
+        return claimRepository.sumQuantitiesByOrderIds(Set.copyOf(orderIds), Claim.Type.CANCELLATION, Claim.cancellationQuantityReservingStatuses()).stream()
+            .collect(Collectors.groupingBy(OrderItemClaimQuantityQueryResult::orderId,
+                Collectors.toMap(OrderItemClaimQuantityQueryResult::orderItemId, OrderItemClaimQuantityQueryResult::quantity)));
     }
 
     @Override

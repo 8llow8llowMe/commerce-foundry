@@ -13,9 +13,12 @@ import com.commercefoundry.shared.commerce.Money;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -789,6 +792,110 @@ class ClaimTest {
         assertThat(completed.status()).isEqualTo(Claim.Status.COMPLETED);
         assertThat(completed.nextAttemptAt()).isNull();
         assertThat(completed.isSettledReturn()).isTrue();
+    }
+
+    @ParameterizedTest
+    @EnumSource(Claim.Status.class)
+    @DisplayName("취소 술어 — 수량을 잡는 취소 = 정산된 취소 + 열린 취소(서로 겹치지 않음) = 거절 밖 전부, 열린 취소는 환불 대기 · 환불 실패. 반품 클레임은 모두 아니다 (#684)")
+    void cancellationPredicates(Claim.Status status) {
+        if (status != Claim.Status.APPROVED) {
+            Claim claim = cancellation(status, Claim.Type.CANCELLATION.isAwaitingAttempt(status) ? NOW : null, status.isFailed() ? "PAYMENT_016" : null,
+                List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER)));
+
+            assertThat(claim.reservesCancellationQuantity()).isEqualTo(status != Claim.Status.REJECTED)
+                .isEqualTo(Claim.cancellationQuantityReservingStatuses().contains(status)).isEqualTo(claim.isSettledCancellation() || claim.isOpenCancellation());
+            assertThat(claim.isSettledCancellation() && claim.isOpenCancellation()).isFalse();
+            assertThat(claim.isSettledCancellation()).isEqualTo(claim.hasRecordedRefund())
+                .isEqualTo(status == Claim.Status.REFUNDED || status == Claim.Status.RESTORATION_FAILED || status == Claim.Status.COMPLETED);
+            assertThat(claim.isOpenCancellation()).isEqualTo(status == Claim.Status.REQUESTED || status == Claim.Status.REFUND_FAILED);
+        }
+        boolean approvedOrLater = status != Claim.Status.REQUESTED && status != Claim.Status.REJECTED;
+        Claim returnClaim = returnClaim(status, approvedOrLater ? krw(1_000) : null, approvedOrLater ? 77L : null,
+            Claim.Type.RETURN.isAwaitingAttempt(status) ? NOW : null, status.isFailed() ? "PAYMENT_016" : null,
+            approvedOrLater ? new Claim.ReturnApproval(CUSTOMER, true, krw(0), 9, NOW) : null);
+        assertThat(List.of(returnClaim.reservesCancellationQuantity(), returnClaim.isSettledCancellation(), returnClaim.isOpenCancellation())).containsOnly(false);
+        assertThat(Claim.cancellationQuantityReservingStatuses()).isEqualTo(Claim.returnQuantityReservingStatuses());
+    }
+
+    @Test
+    @DisplayName("항목별 수량 취소 클레임 — 0 수량 줄은 빼고 주문 줄 순서로 항목 아이디를 발급하며, 받은 요청 키 · 환불액 · 결제 · 다음 시각(now + lease)을 싣는다 (#684)")
+    void requestPartialCancellation() {
+        Order order = paidOrder();
+        long a = order.itemIds().get(0);
+        long b = order.itemIds().get(1);
+        AtomicLong ids = new AtomicLong(500);
+        UUID key = UUID.fromString("00000000-0000-0000-0000-000000000684");
+        Map<Long, Integer> quantities = new HashMap<>();
+        quantities.put(a, 0);
+        quantities.put(b, 1);
+
+        Claim claim = Claim.requestCancellation(400L, order, key, quantities, 77L, krw(5_000), OrderCancelReason.ORDER_MISTAKE, ids::incrementAndGet, NOW, LEASE);
+
+        assertThat(claim.type()).isEqualTo(Claim.Type.CANCELLATION);
+        assertThat(claim.status()).isEqualTo(Claim.Status.REQUESTED);
+        assertThat(claim.requestKey()).isEqualTo(key);
+        assertThat(claim.items()).extracting(ClaimItem::id, ClaimItem::orderItemId, ClaimItem::quantity, ClaimItem::reason)
+            .containsExactly(org.assertj.core.groups.Tuple.tuple(501L, b, 1, ClaimItem.Reason.ORDER_MISTAKE));
+        assertThat(ids.get()).as("0 수량 줄은 항목 아이디를 쓰지 않는다").isEqualTo(501);
+        assertThat(claim.expectedRefund()).isEqualTo(krw(5_000));
+        assertThat(claim.paymentId()).isEqualTo(77L);
+        assertThat(claim.nextAttemptAt()).isEqualTo(Instant.parse("2026-11-06T00:02:00.123456Z"));
+        assertThat(claim.isNew()).isTrue();
+        assertThat(claim.isOpenCancellation()).isTrue();
+        Claim twoLines = Claim.requestCancellation(401L, order, key, Map.of(b, 1, a, 2), 77L, krw(25_000), OrderCancelReason.OTHER,
+            new AtomicLong(600)::incrementAndGet, NOW, LEASE);
+        assertThat(twoLines.items()).as("줄 순서로 발급하고 주문 항목 아이디 순으로 담는다").extracting(ClaimItem::id, ClaimItem::orderItemId, ClaimItem::quantity)
+            .containsExactly(org.assertj.core.groups.Tuple.tuple(601L, a, 2), org.assertj.core.groups.Tuple.tuple(602L, b, 1));
+    }
+
+    @Test
+    @DisplayName("전체 취소 팩토리는 결정적 키 · 전 항목 · 전 수량으로 항목별 수량 팩토리에 위임한 것과 같다 (#684)")
+    void fullCancellationDelegatesToQuantityFactory() {
+        Order order = paidOrder();
+
+        Claim full = Claim.requestCancellation(400L, order, 77L, krw(28_000), OrderCancelReason.OTHER, new AtomicLong(500)::incrementAndGet, NOW, LEASE);
+        Claim viaMap = Claim.requestCancellation(400L, order, Claim.cancellationRequestKey(order.id()),
+            Map.of(order.itemIds().get(0), 2, order.itemIds().get(1), 1), 77L, krw(28_000), OrderCancelReason.OTHER, new AtomicLong(500)::incrementAndGet, NOW, LEASE);
+
+        assertThat(viaMap).isEqualTo(full);
+    }
+
+    @Test
+    @DisplayName("항목별 수량 취소는 주문에 없는 항목 · 음수 · null · 줄의 주문 수량 초과 · 전부 0 · 빈 맵 · 요청 키 없음을 거부하고, 주문 수량 그대로는 받는다 (#684)")
+    void partialCancellationRejectsInvalidQuantities() {
+        Order order = paidOrder();
+        long a = order.itemIds().get(0);
+        long b = order.itemIds().get(1);
+        UUID key = UUID.randomUUID();
+        Function<Map<Long, Integer>, Claim> request = quantities -> Claim.requestCancellation(400L, order, key, quantities, 77L, krw(1_000),
+            OrderCancelReason.OTHER, new AtomicLong(500)::incrementAndGet, NOW, LEASE);
+        Map<Long, Integer> nullQuantity = new HashMap<>();
+        nullQuantity.put(a, null);
+        Map<Long, Integer> nullItem = new HashMap<>();
+        nullItem.put(null, 1);
+
+        assertThatThrownBy(() -> request.apply(Map.of(999L, 1))).as("주문에 없는 항목").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> request.apply(Map.of(a, -1))).as("음수").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> request.apply(nullQuantity)).as("수량 null").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> request.apply(nullItem)).as("항목 null").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> request.apply(Map.of(a, 3))).as("주문 수량 2 초과").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> request.apply(Map.of(b, 2))).as("주문 수량 1 초과").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> request.apply(Map.of(a, 0, b, 0))).as("전부 0").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> request.apply(Map.of())).as("빈 맵").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Claim.requestCancellation(400L, order, null, Map.of(a, 1), 77L, krw(1_000), OrderCancelReason.OTHER,
+            new AtomicLong(500)::incrementAndGet, NOW, LEASE)).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> Claim.requestCancellation(400L, order, key, Map.of(a, 1), 77L, krw(28_001), OrderCancelReason.OTHER,
+            new AtomicLong(500)::incrementAndGet, NOW, LEASE)).as("총액 초과 환불").isInstanceOf(IllegalArgumentException.class);
+        assertThat(request.apply(Map.of(a, 2)).items()).extracting(ClaimItem::quantity).containsExactly(2);
+    }
+
+    @Test
+    @DisplayName("결정적 전체 취소 키는 그 주문에서만 예약 키다 — 부분 취소 접수가 이 판정으로 고객 멱등 키를 거른다 (#684)")
+    void reservedCancellationKey() {
+        assertThat(Claim.isReservedCancellationKey(1L, Claim.cancellationRequestKey(1L))).isTrue();
+        assertThat(Claim.isReservedCancellationKey(2L, Claim.cancellationRequestKey(1L))).isFalse();
+        assertThat(Claim.isReservedCancellationKey(1L, UUID.randomUUID())).isFalse();
+        assertThat(Claim.isReservedCancellationKey(1L, null)).isFalse();
     }
 
     private static Claim approvedReturn(boolean restock) {
