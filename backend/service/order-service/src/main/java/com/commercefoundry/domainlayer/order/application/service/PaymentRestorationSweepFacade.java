@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.order.application.service;
 
 import com.commercefoundry.domainlayer.order.application.port.in.PaymentRestorationSweepUseCase;
+import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationBacklogProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor.Hold;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
@@ -20,15 +21,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentRestorationSweepFacade implements PaymentRestorationSweepUseCase {
 
     private final PaymentRestorationSweepProcessor processor;
+    private final PaymentRestorationBacklogProcessor backlog;
     private final Clock clock;
 
-    /** 선점과 완료만 별도 커밋하며 원격 호출 동안 DB 트랜잭션을 열지 않는다. */
+    /** 선점과 완료만 별도 커밋하며 원격 호출 동안 DB 트랜잭션을 열지 않는다. 적체 경고가 실패해도 배치는 돈다. */
     @Override
     @Transactional(propagation = Propagation.NEVER)
     public void sweep(int batchSize, Duration initialBackoff, Duration maxBackoff) {
         if (batchSize < 1 || batchSize > 10 || initialBackoff.compareTo(Duration.ofMinutes(1)) < 0
             || maxBackoff.compareTo(initialBackoff) < 0 || maxBackoff.compareTo(Duration.ofDays(1)) > 0) {
             throw new IllegalArgumentException("invalid payment restoration batch limits");
+        }
+        try {
+            backlog.warnBacklog();
+        } catch (RuntimeException exception) {
+            log.warn("payment restoration backlog check failed. failure={}", exception.getClass().getSimpleName());
         }
         for (OrderStockRestoration due : processor.findDue(clock.instant(), batchSize)) {
             try {

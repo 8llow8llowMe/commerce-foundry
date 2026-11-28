@@ -21,6 +21,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.query.StockRes
 import com.commercefoundry.domainlayer.order.application.service.OrderPaymentEventFacade;
 import com.commercefoundry.domainlayer.order.application.port.in.PaymentRestorationSweepUseCase;
 import com.commercefoundry.domainlayer.order.application.service.PaymentRestorationSweepFacade;
+import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationBacklogProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderStockProcessor;
@@ -107,7 +108,7 @@ public final class OrderPaymentCrashChild {
         OrderPaymentMapperImpl.class, OrderStockConfirmationRepositoryAdapter.class, OrderStockRestorationRepositoryAdapter.class,
         OrderStockRestorationMapperImpl.class, JpaProcessedEventStore.class, JpaOutboxStore.class,
         OrderEventAdapter.class, OrderPaymentProcessor.class, PaymentApprovalProcessor.class, OrderStockProcessor.class, OrderPaymentEventFacade.class,
-        PaymentRestorationSweepFacade.class, PaymentRestorationSweepProcessor.class})
+        PaymentRestorationSweepFacade.class, PaymentRestorationSweepProcessor.class, PaymentRestorationBacklogProcessor.class})
     public static class Config {
         @Bean Clock clock() {
             return Clock.fixed(env("CASE_SWEEP_SECONDS") == null ? NOW : NOW.plusSeconds(number("CASE_SWEEP_SECONDS")), ZoneOffset.UTC);

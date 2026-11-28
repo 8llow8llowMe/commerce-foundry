@@ -44,6 +44,13 @@ public interface OrderStockRestorationRepository extends JpaRepository<OrderStoc
     @Query("delete from OrderStockRestorationEntity r where r.id = :id and r.origin = :origin")
     int deleteByIdAndOrigin(long id, OrderStockRestoration.Origin origin);
 
+    /** 상태별 행 수 — 지표 · 적체 경고. {@code status} 가 인덱스 첫 컬럼이다. */
+    long countByStatus(OrderStockRestoration.Status status);
+
+    /** 상태별 가장 오래된 작업의 등록 시각 — 지표 · 적체 경고. 없으면 null. */
+    @Query("select min(r.createdAt) from OrderStockRestorationEntity r where r.status = :status")
+    Instant findOldestCreatedAt(OrderStockRestoration.Status status);
+
     /** 스윕 대상 — {@code idx_order_stock_restoration_status_next_attempt_at_id} 순서 그대로 읽는다. */
     List<OrderStockRestorationEntity> findByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(
         OrderStockRestoration.Status status, Instant now, Limit limit);
