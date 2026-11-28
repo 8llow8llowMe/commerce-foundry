@@ -579,12 +579,16 @@ compose는 기본 false를 유지한다. 끄면 기존 로그인은 유지되지
 
 auth A1 활성 관리자 API와 payment A3a 관측 API(PR #548)를 먼저 배포하고 기존 internal 서비스 토큰으로 operations의 호출 권한을 확인한다. Hibernate 생성 operations DDL 스냅숏의 `operations.outbox_alert_state` 신규 테이블과 제약을 사람이 먼저 적용한다(`ddl-auto=none`). 실제 operations 배포 프로세스에 `PAYMENT_OUTBOX_ALERT_ENABLED=true`를 주입한다. 저장소에 operations compose 서비스 정의는 없으며 새 Vault 비밀도 없다. messaging 플래그와 독립적으로 켤 수 있다. 초기 1분/간격 1분·임계 5분·반복 억제 1시간·신선도 30초·락 2분과 실패/해소 의미는 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
 
-### 품절 임박 정기 점검 테이블 (#229 PR-3a)
+### 품절 임박 정기 점검 활성화 (#229 PR-3a · PR-3b)
 
 operations 스키마 스냅숏(`ddl/operations-schema.sql`)에서 신규 `operations.low_stock_alert_state`(점검 워터마크 단일 행, `source='PRODUCT'`)와
 `operations.low_stock_alert_sku`(알린 SKU 추적, 보조 인덱스 없음)의 `create table` · 제약 · 주석만 사람이 먼저 적용한다(`ddl-auto=none`). dev 는 `update` 가 만든다.
-PR-3a 에는 스케줄러가 없어 테이블을 쓰는 코드가 실행되지 않는다. 활성화 게이트 `LOW_STOCK_ALERT_ENABLED`(기본 false)는 PR-3b 에서 생기며,
-켜기 전 순서는 DDL 적용 → operations 전체 배포 → 게이트 ON 이다. 롤백은 게이트 OFF 이며 테이블은 남겨도 무해하다. 새 Vault 비밀 · FE 계약 변경은 없다.
+
+순서: ① 운영 DDL 적용 → ② 새 operations 를 모든 인스턴스에 배포(게이트 OFF 그대로) → ③ operations 프로세스에 `LOW_STOCK_ALERT_ENABLED=true` 주입 후 재기동.
+게이트가 꺼져 있으면 스케줄러 · 전용 스레드가 생기지 않아 테이블을 쓰는 코드가 실행되지 않는다. 롤백은 게이트 OFF 이며 테이블 · 추적 행은 남겨도 무해하다.
+선행 조건은 product PR-2 internal API(`GET /internal/v1/stocks/low`, operations 서비스 토큰 허용)와 auth 수신자 API 배포다. 락은 기존 `operations.shedlock` 테이블을
+이름 `operations-low-stock-alert` 로 같이 쓴다. 나머지 설정 키(`operations.notifications.low-stock-alert.*` — 2m · 10m · 20페이지 · 6h · 7d · 5m)는
+application.yml 기본값을 쓰고 범위는 [stock-alert-guide.md](stock-alert-guide.md) 표를 따른다. 새 Vault 비밀 · FE 계약 변경은 없다.
 
 ### DLT 알림 활성화 (#477 A2)
 
