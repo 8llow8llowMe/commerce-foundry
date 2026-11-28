@@ -76,6 +76,7 @@ class ProductAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/product-drafts/{draftId}/reject", AdminAuthority.CATALOG_MANAGE),
         Map.entry("POST /api/v1/admin/product-drafts/{draftId}/generate", AdminAuthority.CATALOG_MANAGE),
         Map.entry("POST /api/v1/admin/product-drafts/{draftId}/refresh", AdminAuthority.CATALOG_MANAGE),
+        Map.entry("POST /api/v1/admin/product-drafts/{draftId}/regenerate", AdminAuthority.CATALOG_MANAGE),
         // 전시 · 미리보기 · 이미지 업로드
         Map.entry("GET /api/v1/admin/displays/sections", AdminAuthority.CATALOG_READ),
         Map.entry("GET /api/v1/admin/displays/sections/{sectionId}", AdminAuthority.CATALOG_READ),
