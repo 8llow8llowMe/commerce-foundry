@@ -539,6 +539,25 @@ B1(`claim-return-approval.sql`)까지 적용된 상태다(B2a · B2b 는 DDL 없
   새 오류 코드 `ORDER_042` ~ `046`(409) · 검증 `ORDER_171` ~ `173`(400). 새 미리보기 `reason` `REFUND_NOT_OPEN` — 재시도 스케줄러가 꺼진 환경(운영 기본값)에서는
   데이터가 승인 가능해도 이 값이라 승인 버튼이 꺼지고(금액은 보인다) 거절만 된다.
 
+### 결제 후 취소 거절 API (#17 A4 PR-2)
+
+- **DDL 없음** — 취소 + `REJECTED` + 결정의 직전 실패 코드는 기존 check(`ck_claim_admin_decision` · `ck_claim_cancellation_next_attempt` ·
+  `ck_claim_cancellation_failure_code` · `ck_claim_cancellation_payment`)가 이미 받는다(`ClaimCancellationRejectionPostgresTest`).
+- **배포 순서** — payment 무환불 봉인(#691, 아래 "결제 후 취소 무환불 봉인 배포")이 **먼저**다: `VOIDED` DDL 을 모든 환경에 적용하고 payment-service 모든 인스턴스가 새 버전이
+  된 뒤에 이 order 를 배포한다. 이 API 를 누르는 순간 void 를 부르므로 따로 켜는 플래그가 없다 — #691 전에 배포하면 void 가 404 · 계약 위반으로 늘 503 `ORDER_054` 이고
+  (거절이 막힐 뿐 안전 쪽), 롤링 중 옛 payment 인스턴스는 `VOIDED` 행을 읽지 못한다. order 의 전용 서킷 `payment-cancellation-void` · Feign 클라이언트는 PR-1(#801)에
+  이미 있다.
+- **게이트** — 재시도 스케줄러(`ORDER_CANCELLATION_RETRY_ENABLED`) 게이트를 보지 않는다(이어지는 자동 단계가 없다). 결제 개방 순서(위 결제 → 주문 반영 표)는 그대로다.
+- **권한 · 감사** — `SETTLEMENT_MANAGE`(대표만), 감사 `CLAIM_CANCELLATION_REJECT`(`security-guide.md` §3-1 · §11-4).
+- **롤백** — 이 배포부터 결제 후 취소 `REJECTED` 행과 `ADMIN` 복귀 이력(취소 요청 → 직전 상태)이 생긴다. 앱 롤백은 데이터상 안전하다 — 클레임 생성자는 PR-1 전후로
+  같고 거절 행을 그대로 읽는다. 다만 새 거절이 막히고, 거절된 주문의 고객 재취소가 다시 결정적 키 충돌 409 `ORDER_025` 로 돌아간다(055 가 사라진다).
+- **운영 로그** — 성공 WARN `cancellation rejected by admin after no-refund confirmation`(아이디 · 직전 실패 코드 · 주문 상태, 금액 · 사유 없음). 거부 WARN
+  `cancellation rejection refused …`, payment 가 환불을 확정한 갈라진 상태 WARN `payment reports refund for a refund-failed claim. records diverged`(→ 결제 관리 화면 확인 뒤
+  환불 완료로 확정), 봉인 뒤 기록 실패 WARN `cancellation no refund sealed in payment but rejection not recorded`(→ 상세를 다시 읽어 다시 거절, 환불 완료로 바뀌었으면 결제 관리 화면과 대조 #693), 거절된 취소에 환불 성공이 오면
+  ERROR `CANCELLATION_REFUND_AFTER_REJECTION`(오면 안 되는 결과 — 결제 관리 화면과 대조).
+- **FE 계약** — 새 경로 1개(`api-design-guide.md` 클레임 어드민 표), 상세 `recovery.cancellationRejectable`, 새 오류 코드 `ORDER_052` · `053`(409) · `054`(503),
+  고객 취소 409 `ORDER_055`(§2-17). 고객 `cancelable` 은 PR-3 이 바꾼다.
+
 ### 결제 후 취소 클레임 배포 (#16 PR-2a)
 
 `claim`에 결제 후 취소(CANCELLATION) 유형 · 환불/복원 상태 · 재시도 칸(`payment_id`, `attempt_count`, `next_attempt_at`, `failure_code`)을 더한다.
@@ -652,7 +671,8 @@ Hibernate validate·생성 DDL/스냅숏 일치·PG 계약/복구/락 시험을 
 새 payment-service 기동 **전**(dev 포함)에 `service/payment-service/src/test/resources/ddl/payment-cancel-voided-status.sql`로 `payment_cancel.status` check 에 `VOIDED` 를 더한다 — 제약 이름 확인 조회 · 잠금 · 롤백 불가 이유는 [취소 DDL 문서](payment-cancellation-ddl.md) "#691 VOIDED 상태", 미적용 상태의 봉인은 500 이고 order 는 거절을 막는다(안전 쪽 실패).
 
 - dev 를 포함해 모든 환경에 DDL 을 먼저 적용한다(`ddl-auto=update` 는 기존 check 제약을 고치지 않는다).
-- order-service 의 void 호출(#17 A4 2단계)은 payment-service 모든 인스턴스가 새 버전이 된 뒤에 켠다 — 롤링 중 옛 인스턴스는 `VOIDED` 행을 읽으면 enum 변환에 실패한다.
+- order-service 의 void 호출(#17 A4 PR-2 — 대표의 취소 거절 API)은 payment-service 모든 인스턴스가 새 버전이 된 뒤에 배포한다(따로 켜는 플래그가 없다, 위 "결제 후 취소 거절 API") —
+  롤링 중 옛 인스턴스는 `VOIDED` 행을 읽으면 enum 변환에 실패한다.
 
 ### 외부 확인 환불 상태 배포 (#693)
 

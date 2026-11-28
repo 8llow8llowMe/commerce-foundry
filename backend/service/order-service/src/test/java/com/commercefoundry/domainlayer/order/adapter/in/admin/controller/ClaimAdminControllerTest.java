@@ -305,6 +305,64 @@ class ClaimAdminControllerTest {
         verifyNoInteractions(claimAdminUseCase);
     }
 
+    // ---- 결제 후 취소 거절 (#17 A4) ----
+
+    private static final String CANCELLATION_REJECTION = "cancellation-rejection";
+    private static final String CANCELLATION_REJECTION_BODY = "{\"expectedVersion\":5,\"reason\":\"결제사 화면에서 환불 없음 확인\"}";
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = MemberRole.class, names = {"ADMIN", "OWNER"})
+    @DisplayName("취소 거절은 SETTLEMENT_MANAGE 라 ADMIN · OWNER 만 유스케이스에 닿고 버전 · 사유는 본문, 관리자 아이디는 토큰에서 온다 (#17 A4)")
+    void settlementManagersMayRejectCancellation(MemberRole role) {
+        assertThat(decide(CANCELLATION_REJECTION, role, CANCELLATION_REJECTION_BODY)).hasStatusOk();
+
+        verify(claimAdminUseCase).rejectCancellation(1L, 5L, "결제사 화면에서 환불 없음 확인", TestTokens.MEMBER_ID);
+    }
+
+    @Test
+    @DisplayName("MANAGER(반품 거절은 가능) · STAFF · 고객은 취소 거절 403 · SECURITY_005, 토큰 없으면 401 이고 유스케이스를 부르지 않는다 (#17 A4)")
+    void othersMayNotRejectCancellation() {
+        for (MemberRole role : List.of(MemberRole.MANAGER, MemberRole.STAFF, MemberRole.CUSTOMER)) {
+            SecurityEnvelopeAssertions.assertEnvelope(decide(CANCELLATION_REJECTION, role, CANCELLATION_REJECTION_BODY).getResponse(),
+                SecurityErrorCode.FORBIDDEN);
+        }
+        SecurityEnvelopeAssertions.assertEnvelope(mvc.post().uri(PATH + "/1/" + CANCELLATION_REJECTION).contentType(MediaType.APPLICATION_JSON)
+            .content(CANCELLATION_REJECTION_BODY).exchange().getResponse(), SecurityErrorCode.UNAUTHORIZED);
+        verifyNoInteractions(claimAdminUseCase);
+    }
+
+    @ParameterizedTest(name = "{1}: {0}")
+    @org.junit.jupiter.params.provider.CsvSource(delimiter = '|', value = {
+        "{\"reason\":\"확인\"}|ORDER_169",
+        "{\"expectedVersion\":-1,\"reason\":\"확인\"}|ORDER_169",
+        "{\"expectedVersion\":5}|ORDER_170",
+        "{\"expectedVersion\":5,\"reason\":\"\\u3000\"}|ORDER_170",
+        "{\"expectedVersion\":5,\"reason\":\"확인\\n완료\"}|ORDER_151",
+        "{\"expectedVersion\":5,\"reason\":\"확인\\u200B완료\"}|ORDER_151"
+    })
+    @DisplayName("취소 거절 본문은 확정 · 종결과 같은 DTO 검증이다 — ORDER_169 · 170 · 151 이고 유스케이스를 부르지 않는다 (#17 A4)")
+    void cancellationRejectionBodyValidation(String body, String code) {
+        MvcTestResult result = decide(CANCELLATION_REJECTION, MemberRole.OWNER, body);
+
+        assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        verifyNoInteractions(claimAdminUseCase);
+    }
+
+    @Test
+    @DisplayName("취소 거절 사유는 200자까지 받고 201자는 400 · ORDER_148, 양수가 아닌 아이디는 400 · ORDER_166 이다 (#17 A4)")
+    void cancellationRejectionReasonLengthAndClaimId() {
+        String over = "{\"expectedVersion\":5,\"reason\":\"" + "가".repeat(201) + "\"}";
+
+        MvcTestResult tooLong = decide(CANCELLATION_REJECTION, MemberRole.OWNER, over);
+        MvcTestResult nonPositive = mvc.post().uri(PATH + "/0/" + CANCELLATION_REJECTION).header(HttpHeaders.AUTHORIZATION, bearer(MemberRole.OWNER))
+            .contentType(MediaType.APPLICATION_JSON).content(CANCELLATION_REJECTION_BODY).exchange();
+
+        assertThat(tooLong).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_148");
+        assertThat(nonPositive).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_166");
+        verifyNoInteractions(claimAdminUseCase);
+    }
+
     @Test
     @DisplayName("양수가 아닌 클레임 아이디의 반품 승인 · 거절은 400 · ORDER_166 이다 (#17 B2c-2)")
     void returnDecisionRejectsNonPositiveClaimId() {

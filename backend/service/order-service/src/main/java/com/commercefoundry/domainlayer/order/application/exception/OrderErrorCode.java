@@ -145,6 +145,23 @@ public enum OrderErrorCode {
     RETURN_REFUND_NOT_CALCULABLE("ORDER_045", "주문 · 결제 기록이 맞지 않아 환불액을 계산할 수 없습니다. 시스템 관리자에게 확인을 요청해 주세요.", HttpStatus.CONFLICT),
     /** 서버가 다시 계산한 환불액 · 통화가 운영자가 화면에서 본 값과 다르다 — 그 사이 다른 반품이 정산됐거나 통화가 다르다(#17 B2c-2). */
     RETURN_REFUND_CHANGED("ORDER_046", "환불액이 화면에서 본 금액과 다릅니다. 새로고침해 환불액을 다시 확인한 뒤 승인해 주세요.", HttpStatus.CONFLICT),
+    // 047~051 은 결제 후 부분 취소(#684 PR-4) 몫으로 비워 둔다 — 056 부터도 #684 다(#17 2026-11-28 결정)
+    /**
+     * 결제 후 취소 거절 (#17 A4) — payment 무환불 판정이 "이 클레임으로 환불이 확정됐다(REFUNDED)"고 답했다. order 는 환불 실패인데 결제는 환불된, 이미 갈라진 상태라
+     * 거절하면 돈이 나간 주문이 다시 출고된다. 대표는 결제 관리 화면에서 환불을 확인하고 환불 완료로 확정한다(warn 로그).
+     */
+    CANCELLATION_REJECTION_REFUND_FOUND("ORDER_052", "결제사에서 이 취소의 환불이 이미 처리된 것으로 확인돼 취소를 거절할 수 없습니다. 결제 관리 화면에서 환불을 확인한 뒤 "
+        + "'환불 완료로 확정'으로 마무리해 주세요.", HttpStatus.CONFLICT),
+    /** 결제 후 취소 거절 (#17 A4) — payment 가 환불이 없었음을 지금은 확정하지 못했다(UNCONFIRMED). 다시 시도하면 결제사 잔액까지 새로 대조한다. */
+    CANCELLATION_REJECTION_UNVERIFIED("ORDER_053", "결제사에서 환불이 없었다는 것을 확인하지 못해 지금은 취소를 거절할 수 없습니다. 잠시 뒤 다시 시도하고, "
+        + "계속되면 결제 관리 화면에서 환불 여부를 확인해 주세요.", HttpStatus.CONFLICT),
+    /** 결제 후 취소 거절 (#17 A4) — payment 무환불 판정을 받지 못했다(UNAVAILABLE — 결제사 조회 장애 · 전송 실패 · 서킷 열림 · 계약 위반 · 호출 예외). */
+    CANCELLATION_REJECTION_CHECK_UNAVAILABLE("ORDER_054", "지금은 결제사에서 환불 여부를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    /**
+     * 고객 결제 후 취소 (#17 A4) — 이 주문의 취소 요청은 이미 거절됐다. 거절 뒤 같은 주문의 재취소는 받지 않는다(결정적 키 충돌 {@code ORDER_025} 대신 이 코드).
+     * 고객에게는 상태 "거절"만 보이고 거절 사유는 보이지 않는다.
+     */
+    CANCELLATION_ALREADY_REJECTED("ORDER_055", "취소 요청이 거절된 주문은 다시 취소할 수 없습니다. 고객센터에 문의해 주세요.", HttpStatus.CONFLICT),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),

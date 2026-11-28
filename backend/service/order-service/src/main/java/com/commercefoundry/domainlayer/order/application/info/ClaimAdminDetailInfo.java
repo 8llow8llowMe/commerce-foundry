@@ -28,14 +28,18 @@ public record ClaimAdminDetailInfo(
      * @param retryable 다시 시도 선점 조건(A2b)
      * @param refundConfirmable 수동 환불 확정 조건(A3, 주문 상태는 실행 때 본다)
      * @param completable 복원 생략 종결 조건(A3, 주문 상태는 실행 때 본다) — 세 플래그 모두 {@code ClaimAdminRecoveryProcessor} 가 실행과 같은 조건으로 판정한다
+     * @param cancellationRejectable 결제 후 취소 거절 후보(A4) — {@code ClaimCancellationRejectionProcessor} 가 실행의 클레임 조건(R1 · R2)으로 판정한다.
+     *     주문 · 이력 · 결제 기록과 payment 무환불 판정은 실행 때 본다
      * @param returnDecision 반품 결정 미리보기. 결정 대기 반품이 아니면 null 을 넘긴다
      */
-    public static ClaimAdminDetailInfo from(Claim claim, boolean retryable, boolean refundConfirmable, boolean completable, ReturnDecision returnDecision) {
+    public static ClaimAdminDetailInfo from(
+        Claim claim, boolean retryable, boolean refundConfirmable, boolean completable, boolean cancellationRejectable, ReturnDecision returnDecision
+    ) {
         Claim.Decision decision = claim.decision();
         Claim.ReturnApproval approval = claim.approval();
         return new ClaimAdminDetailInfo(claim.id(), claim.orderId(), claim.type(), claim.status(), claim.expectedRefund(), claim.requestedAt(),
             claim.items().stream().map(item -> new Line(item.orderItemId(), item.quantity(), item.reason())).toList(),
-            new Recovery(ClaimRecoverySituation.of(claim), claim.nextAttemptAt(), retryable, refundConfirmable, completable,
+            new Recovery(ClaimRecoverySituation.of(claim), claim.nextAttemptAt(), retryable, refundConfirmable, completable, cancellationRejectable,
                 decision == null ? null : new LastDecision(decision.reason(), decision.decidedAt()), claim.version()),
             approval == null ? null : new ReturnApproval(approval.fault(), approval.restock(), approval.deduction(), approval.approvedAt()), returnDecision);
     }
@@ -46,12 +50,13 @@ public record ClaimAdminDetailInfo(
     /**
      * @param nextAutomaticAttemptAt 자동 처리가 다시 확인할 시각. 대기 상태가 아니면 null
      * @param completable 복원 생략 종결 후보(A3) — 주문 전 수량 취소면 주문이 취소 완료인지는 실행 때 본다
-     * @param lastDecision 마지막 운영자 결정(수동 환불 확정 · 복원 생략 종결). 없으면 null
+     * @param cancellationRejectable 결제 후 취소 거절 후보(A4) — 결제사가 종결 거절했고 진행 중이 아닌 취소 환불 실패. 실행 때 주문 · 이력 · 결제 기록 · payment 판정을 본다
+     * @param lastDecision 마지막 운영자 결정(수동 환불 확정 · 복원 생략 종결 · 거절). 없으면 null
      * @param version 다시 시도 · 결정 요청의 {@code expectedVersion} 으로 그대로 보내는 화면 버전
      */
     public record Recovery(
         ClaimRecoverySituation situation, Instant nextAutomaticAttemptAt, boolean retryable, boolean refundConfirmable, boolean completable,
-        LastDecision lastDecision, long version
+        boolean cancellationRejectable, LastDecision lastDecision, long version
     ) {
     }
 

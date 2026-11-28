@@ -3,10 +3,14 @@ package com.commercefoundry.domainlayer.order.application.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.commercefoundry.domainlayer.order.adapter.in.admin.dto.response.ClaimAdminResponse;
@@ -18,18 +22,24 @@ import com.commercefoundry.domainlayer.order.application.info.ClaimAdminDetailIn
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminAuditProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminRecoveryProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimCancellationRejectionProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimCancellationVoidProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimReturnDecisionProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.transaction.CannotCreateTransactionException;
 
-/** 어드민 다시 시도 · 수동 확정 · 종결 · 반품 승인 · 거절의 단계 순서 · 실패 처리 · 감사 (#17). 선점 · 확정 · 승인 커밋 → 원격(트랜잭션 밖) → 현재 상세 순이다. */
+/**
+ * 어드민 다시 시도 · 수동 확정 · 종결 · 반품 승인 · 거절 · 결제 후 취소 거절의 단계 순서 · 실패 처리 · 감사 (#17). 선점 · 확정 · 승인 커밋 → 원격(트랜잭션 밖) → 현재 상세,
+ * 취소 거절은 자격 확인 → 무환불 판정(트랜잭션 밖) → 거절 기록 → 현재 상세 순이다.
+ */
 class ClaimAdminFacadeTest {
     private static final long ADMIN = 9;
 
@@ -40,7 +50,10 @@ class ClaimAdminFacadeTest {
     private final ClaimAdminPresenter presenter = mock(ClaimAdminPresenter.class);
     private final ClaimAdminAuditProcessor audit = mock(ClaimAdminAuditProcessor.class);
     private final ClaimReturnDecisionProcessor returnDecision = mock(ClaimReturnDecisionProcessor.class);
-    private final ClaimAdminFacade facade = new ClaimAdminFacade(processor, recovery, cancellation, pipeline, presenter, audit, returnDecision);
+    private final ClaimCancellationRejectionProcessor cancellationRejection = mock(ClaimCancellationRejectionProcessor.class);
+    private final ClaimCancellationVoidProcessor cancellationVoid = mock(ClaimCancellationVoidProcessor.class);
+    private final ClaimAdminFacade facade = new ClaimAdminFacade(processor, recovery, cancellation, pipeline, presenter, audit, returnDecision,
+        cancellationRejection, cancellationVoid);
 
     private final Claim held = mock(Claim.class);
     private final ClaimAdminDetailInfo detail = mock(ClaimAdminDetailInfo.class);
@@ -273,5 +286,96 @@ class ClaimAdminFacadeTest {
         when(returnDecision.reject(2, 5, REASON, ADMIN)).thenThrow(notDecidable);
         assertThatThrownBy(() -> facade.rejectReturn(2, 5, REASON, ADMIN)).isSameAs(notDecidable);
         verify(audit).returnRejected(ADMIN, 2, false);
+    }
+
+    // ---- 결제 후 취소 거절 (#17 A4) ----
+
+    private final Claim eligible = mock(Claim.class);
+
+    private void rejectionReady() {
+        when(eligible.id()).thenReturn(2L);
+        when(cancellationRejection.prepare(2, 4)).thenReturn(eligible);
+        detailReady();
+    }
+
+    /** 취소 거절은 재고 복원 · 환불 경로(파이프라인)와 처리 횟수 세기를 쓰지 않는다. */
+    private void noRestorationOrRefund() {
+        verify(pipeline, never()).progress(any());
+        verify(cancellation, never()).recordAttemptFailure(any());
+        verifyNoInteractions(recovery, returnDecision);
+    }
+
+    private void neverRecordsRejection() {
+        verify(cancellationRejection, never()).reject(anyLong(), anyLong(), any(), anyLong());
+    }
+
+    @Test
+    @DisplayName("취소 거절 — 자격 확인(tx1) → 무환불 판정(트랜잭션 밖) → 거절 기록(tx2) → 성공 감사 → 다시 읽은 상세 순이고 재고 복원 · 환불은 부르지 않는다")
+    void rejectCancellationRunsStepsInOrder() {
+        rejectionReady();
+
+        assertThat(facade.rejectCancellation(2, 4, REASON, ADMIN)).isSameAs(response);
+
+        InOrder order = inOrder(cancellationRejection, cancellationVoid, audit, processor);
+        order.verify(cancellationRejection).prepare(2, 4);
+        order.verify(cancellationVoid).confirmNoRefund(eligible);
+        order.verify(cancellationRejection).reject(2, 4, REASON, ADMIN);
+        order.verify(audit).cancellationRejected(ADMIN, 2, true);
+        order.verify(processor).getDetail(2);
+        verify(audit, never()).cancellationRejected(ADMIN, 2, false);
+        noRestorationOrRefund();
+    }
+
+    @Test
+    @DisplayName("취소 거절 — 자격 미달(041) · 버전(037) · 없음(032)이면 무환불 판정을 부르지 않고 실패 감사 뒤 그대로 던진다")
+    void ineligibleRejectionNeverCallsVoid() {
+        for (OrderErrorCode code : List.of(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED, OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED,
+            OrderErrorCode.NOT_FOUND_CLAIM)) {
+            OrderException refused = new OrderException(code);
+            doThrow(refused).when(cancellationRejection).prepare(2, 4);
+
+            assertThatThrownBy(() -> facade.rejectCancellation(2, 4, REASON, ADMIN)).isSameAs(refused);
+        }
+
+        verify(cancellationVoid, never()).confirmNoRefund(any());
+        neverRecordsRejection();
+        verify(audit, times(3)).cancellationRejected(ADMIN, 2, false);
+        verify(audit, never()).cancellationRejected(ADMIN, 2, true);
+        verify(processor, never()).getDetail(2);
+        noRestorationOrRefund();
+    }
+
+    @Test
+    @DisplayName("취소 거절 — 무환불 확정이 아니면(052 · 053 · 054) 거절 기록(tx2)을 부르지 않고 실패 감사 뒤 그대로 던진다")
+    void unconfirmedNoRefundNeverRecordsRejection() {
+        rejectionReady();
+        for (OrderErrorCode code : List.of(OrderErrorCode.CANCELLATION_REJECTION_REFUND_FOUND, OrderErrorCode.CANCELLATION_REJECTION_UNVERIFIED,
+            OrderErrorCode.CANCELLATION_REJECTION_CHECK_UNAVAILABLE)) {
+            OrderException refused = new OrderException(code);
+            doThrow(refused).when(cancellationVoid).confirmNoRefund(eligible);
+
+            assertThatThrownBy(() -> facade.rejectCancellation(2, 4, REASON, ADMIN)).isSameAs(refused);
+        }
+
+        neverRecordsRejection();
+        verify(audit, times(3)).cancellationRejected(ADMIN, 2, false);
+        verify(audit, never()).cancellationRejected(ADMIN, 2, true);
+        noRestorationOrRefund();
+    }
+
+    @Test
+    @DisplayName("취소 거절 — 봉인 뒤 거절 기록(tx2)이 지면(잠금 · 낙관락 037) 예외를 바꾸지 않고 실패 감사 뒤 그대로 던진다 — 같은 화면으로 다시 거절하면 끝난다")
+    void sealedButUnrecordedRejectionIsRethrown() {
+        rejectionReady();
+        OrderException lost = new OrderException(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        when(cancellationRejection.reject(2, 4, REASON, ADMIN)).thenThrow(lost);
+
+        assertThatThrownBy(() -> facade.rejectCancellation(2, 4, REASON, ADMIN)).isSameAs(lost);
+
+        verify(cancellationVoid).confirmNoRefund(eligible);
+        verify(audit).cancellationRejected(ADMIN, 2, false);
+        verify(audit, never()).cancellationRejected(ADMIN, 2, true);
+        verify(processor, never()).getDetail(2);
+        noRestorationOrRefund();
     }
 }

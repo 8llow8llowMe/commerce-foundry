@@ -1448,24 +1448,36 @@ commit;
   지역 정보라 그대로 둔다. 맞춤 제작 입력값(치수 등)도 제작에 필요해 그대로 보인다. 원문은 송장 출력(#18)처럼 꼭 필요한 경로가 감사와 함께 다룬다. 사유 · 배송지는 로그에 남기지 않는다.
 - **감사** — 목록 · 상세 열람과 상태 변경(성공 · 실패, 일괄은 주문마다)을 `admin.audit` 한 줄로 남긴다(`security-guide.md` §11-4 — `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE`).
 - **목록** — 기간은 주문 시각 `[from, to)` (UTC)이고 비면 그쪽 끝이 열려 있다. 정렬은 주문 시각 → 아이디 내림차순이고 `idx_orders_status_created_at_id` · `idx_orders_created_at_id` 범위로 읽는다(건수 쿼리도). 첫 상품명 · 항목 수 · 받는 분은 그 페이지 주문만 묶어 읽는다(항목 1번 · 배송지 1번).
-  결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 조회는 아래 계약이며 승인 · 환불 · `REFUND_FAILED` 재시도는 후속이다.
+  결제수단 필터는 order 에 결제 정보가 없어 결제 연동(#14) 뒤에 더한다. 클레임 조회 · 수습(다시 시도 · 수동 환불 확정 · 복원 생략 종결) · 반품 승인 · 거절 ·
+  결제 후 취소 거절은 아래 계약이다.
 
-#### 어드민 클레임 조회 · 결제 후 취소 다시 시도 · 수동 환불 확정 · 복원 생략 종결 (#17)
+#### 어드민 클레임 조회 · 결제 후 취소 다시 시도 · 수동 환불 확정 · 복원 생략 종결 · 반품 승인 · 거절 · 결제 후 취소 거절 (#17)
 
-조회 두 경로는 `AdminAuthority.ORDER_READ`(ADMIN · OWNER · MANAGER · STAFF), 다시 시도는 `AdminAuthority.ORDER_MANAGE`(ADMIN · OWNER · MANAGER),
-수동 환불 확정 · 복원 생략 종결은 `AdminAuthority.SETTLEMENT_MANAGE`(ADMIN · OWNER — 대표만, `security-guide.md` §3-1)다.
+조회 두 경로는 `AdminAuthority.ORDER_READ`(ADMIN · OWNER · MANAGER · STAFF), 다시 시도 · 반품 승인 · 거절은 `AdminAuthority.ORDER_MANAGE`(ADMIN · OWNER · MANAGER),
+수동 환불 확정 · 복원 생략 종결 · 결제 후 취소 거절은 `AdminAuthority.SETTLEMENT_MANAGE`(ADMIN · OWNER — 대표만, `security-guide.md` §3-1)다.
 CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 어드민 Swagger 그룹에 포함된다.
 
 | API | 응답 | 검증/오류 |
 |-----|------|-----------|
 | `GET /api/v1/admin/claims?orderId=&type=&status=&page=0&size=20` | 200 `PageResponse<{claimId,orderId,type,status,expectedRefund,requestedAt}>` | page 0 이상 `ORDER_144`, size 1~100 `ORDER_145`, orderId 양수 `ORDER_141`, page×size가 JPA offset 한도 초과 `ORDER_167`, 타입·범위 오류 `ORDER_198` (400) |
-| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}],recovery:{situation,nextAutomaticAttemptAt,retryable,refundConfirmable,completable,lastDecision:{reason,decidedAt}\|null,version},returnApproval:{fault,restock,deduction,approvedAt}\|null,returnDecision:{approvable,rejectable,reason\|null,defaultFault,refundByFault:[{fault,amount}]}\|null}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
+| `GET /api/v1/admin/claims/{claimId}` | 200 `{claimId,orderId,type,status,expectedRefund,requestedAt,items:[{orderItemId,quantity,reason}],recovery:{situation,nextAutomaticAttemptAt,retryable,refundConfirmable,completable,cancellationRejectable,lastDecision:{reason,decidedAt}\|null,version},returnApproval:{fault,restock,deduction,approvedAt}\|null,returnDecision:{approvable,rejectable,reason\|null,defaultFault,refundByFault:[{fault,amount}]}\|null}` | claimId 양수 `ORDER_166` (400), 없음 `ORDER_032` (404), 타입·범위 오류 `ORDER_198` (400) |
 | `POST /api/v1/admin/claims/{claimId}/retries` `{expectedVersion}` (#17 A2b) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 다시 시도할 수 없음(처리 완료 · 승인 전 · 거절된 반품 · 주문 상태 이상) `ORDER_038` · 자동 처리 중(lease 안) `ORDER_039` (409), 결제 취소 결과 미반영 `ORDER_036` · 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
 | `POST /api/v1/admin/claims/{claimId}/refund-confirmation` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | expectedVersion 없음 · 음수 `ORDER_169` · 사유 없음 · 공백 `ORDER_170` · 200자 초과 `ORDER_148` · 제어 문자 `ORDER_151` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(같은 주문 잠금 경합 포함) `ORDER_037` · 환불 실패가 아님 · 결과 미확인 · 반품 막힘인데 다시 시도 기한 안 · 주문이 취소 요청 · 취소 완료(반품은 반품 요청)가 아님 · 취소 · 반품 정리 판정 불가 `ORDER_041` (409), 재시도 스케줄러 꺼짐 `ORDER_040` (503) |
 | `POST /api/v1/admin/claims/{claimId}/completion` `{expectedVersion,reason}` (#17 A3) | 200 다시 읽은 상세(위와 같은 모양) | 본문 검증은 위와 같다(`ORDER_169` · `170` · `148` · `151`, 400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경 `ORDER_037` · 종결 후보가 아님(복원 결과 미확인 · 주문 상태 이상 · 다른 상태) · 주문 전 수량 취소인데 주문이 취소 완료가 아님 `ORDER_041` (409) |
 | `POST /api/v1/admin/claims/{claimId}/return-approval` `{expectedVersion,fault?,restock,deductionAmount:{amount,currency},expectedRefundAmount:{amount,currency}}` (#17 B2c-2) | 200 다시 읽은 상세(위와 같은 모양 — 같은 요청에서 환불 · 복원을 이어 `status` 가 `COMPLETED` 등으로 나아가 있을 수 있다) | expectedVersion `ORDER_169` · restock 없음 `ORDER_171` · deductionAmount 없음 · 음수 · 통화 없음 `ORDER_172` · expectedRefundAmount 없음 · 0 이하 · 통화 없음 `ORDER_173` · 모르는 귀책 · 통화 `ORDER_100` · claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(같은 주문 잠금 경합 포함) `ORDER_037` · 결정할 수 없는 반품 `ORDER_042` · 다른 반품 환불 진행 중 `ORDER_043` · 환불액 0 이하 `ORDER_044` · 환불액 계산 불가 `ORDER_045` · 환불액 · 통화가 화면과 다름 `ORDER_046` (409), 재시도 스케줄러 꺼짐 `ORDER_040` · 결제 취소 결과 미반영 `ORDER_036` (503) |
 | `POST /api/v1/admin/claims/{claimId}/return-rejection` `{expectedVersion,reason}` (#17 B2c-2) | 200 다시 읽은 상세(위와 같은 모양) | 본문 검증은 확정 · 종결과 같다(`ORDER_169` · `170` · `148` · `151`, 400), claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(같은 주문 잠금 경합 포함) `ORDER_037` · 결정할 수 없는 반품 `ORDER_042` (409) |
+| `POST /api/v1/admin/claims/{claimId}/cancellation-rejection` `{expectedVersion,reason}` (#17 A4) | 200 다시 읽은 상세(위와 같은 모양 — `status` `REJECTED`, `recovery.lastDecision` 에 사유) | 본문 검증은 확정 · 종결과 같다(`ORDER_169` · `170` · `148` · `151`, 400), claimId `ORDER_166` (400), 없음 `ORDER_032` (404), 버전 불일치 · 동시 변경(같은 주문 잠금 경합 · 저장 경합 포함) `ORDER_037` · 거절할 수 없는 접수(결제사 거절 환불 실패가 아님 · 결과 미확인 · 주문이 취소 요청이 아님 · 같은 주문의 다른 취소 진행 중 · 되돌릴 상태를 이력에서 확인 못 함 · 결제 기록 불일치) `ORDER_041` · 결제사에서 이미 환불됨 `ORDER_052` · 결제사에서 환불 없음을 확인 못 함 `ORDER_053` (409), 결제사 확인 불가 `ORDER_054` (503) |
 
+- **결제 후 취소 거절 (#17 A4, `cancellation-rejection`)** — 결제사가 환불을 거절해 멈춘 결제 후 취소(`recovery.situation` `REFUND_REJECTED`)를 대표가 끝내고 주문을
+  취소 요청 전 상태(결제 완료 · 제작 중 · 상품 준비중 — 주문 이력의 직전 상태)로 되돌린다. 환불 · 재고 복원은 하지 않는다. 누르면 서버가 **결제사에 이 취소의 환불이
+  없었는지 한 번 확인**하고(payment 무환불 판정, `payment-guide.md` §8-1) 없었음이 확인된 경우에만 거절한다 — 이미 환불됐으면 409 `ORDER_052`(결제 관리 화면에서 환불을
+  확인하고 "환불 완료로 확정"), 확인하지 못했으면 409 `ORDER_053`(잠시 뒤 다시, 계속되면 결제 관리 화면 확인), 확인 자체가 안 되면 503 `ORDER_054`(잠시 뒤 다시)다.
+  세 경우 모두 클레임 · 주문은 그대로다. `cancellationRejectable` 은 클레임만 본 후보(결제사가 거절한 환불 실패 · 자동 처리 중 아님)이고 상세 조회는 결제사에 묻지 않는다 —
+  주문 상태 · 같은 주문의 다른 취소 · 이력 · 결제 기록이 맞지 않으면 실행 때 409 `ORDER_041` 이다. 결과 미확인(`REFUND_UNCONFIRMED`)은 돈이 나갔을 수 있어 후보가 아니다.
+  재시도 스케줄러 게이트(`ORDER_040`)는 걸지 않는다(이어지는 자동 단계가 없다). 같은 화면으로 다시 보내면 409 `ORDER_037`, 거절된 접수는 다시 시도 `ORDER_038` · 확정 · 거절
+  `ORDER_041` 이다. 사유는 클레임 결정 칸(`recovery.lastDecision`)과 주문 이력(`ADMIN`)에 남고, 고객 화면에는 상태 "거절"만 보인다(사유 · 알림 없음).
+  감사 `CLAIM_CANCELLATION_REJECT`(성공 · 실패). 거절된 주문의 고객 재취소는 409 `ORDER_055` 다(§2-17). 고객 `cancelable` 반영은 #17 PR-3 다.
+  가상계좌 · USD · 결제키 없는 결제는 결제사 대조 대상이 아니라 늘 `ORDER_053` 이다 — 출구는 수동 환불 확정이고, 대표의 수동 "환불 없음" 확정 경로는 후속이다.
 - **반품 승인 · 거절 (#17 B2c-2)** — 권한 `ORDER_MANAGE`. 승인 본문의 `fault` 가 없으면 상세의 `defaultFault` 다. `expectedRefundAmount` 는 화면에서 본
   "고른 귀책의 `refundByFault` 금액 − 차감액"이다 — 서버가 주문을 잠그고 미리보기와 **같은 판정 · 산식**으로 다시 계산해 금액 · 통화가 다르면 409 `ORDER_046`(차감액 통화가
   주문 통화와 다를 때도), 0 이하면 `ORDER_044` 다. 판정 409 는 미리보기 `reason` 과 짝이다 — `NOT_DECIDABLE` `ORDER_042` · `RETURN_IN_FLIGHT` `ORDER_043` ·
@@ -1484,7 +1496,7 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
   승인된 반품에는 `returnApproval`(운영자가 고른 귀책 `fault` metadata · `restock` · 차감액 `deduction` · 승인 시각)이 있고 승인자 아이디는 내지 않는다.
   결정 대기 반품 상세는 미리보기를 위해 주문(주문이 반품 요청이면 같은 주문 클레임 목록 · 결제 기록까지)을 더 읽는다 — 항목 수와 무관한 고정 횟수다.
 - **처리 상황 `recovery` (#17 A2b)** — 운영자는 비개발자라 원시 오류 코드(`PAYMENT_*` · `PRODUCT_*`) · 시도 횟수 · 결제 아이디를 내지 않는다.
-  `situation` 은 `{code,name,description}` metadata 이고 `NO_ACTION`(처리 끝 · 승인 전 · 거절된 반품) · `AUTO_PROCESSING`(환불 대기 · 복원 대기) · `REFUND_UNCONFIRMED` ·
+  `situation` 은 `{code,name,description}` metadata 이고 `NO_ACTION`(처리 끝 · 승인 전 · 거절된 반품 · 거절된 취소) · `AUTO_PROCESSING`(환불 대기 · 복원 대기) · `REFUND_UNCONFIRMED` ·
   `REFUND_WAITING`(반품 — 같은 결제의 다른 환불에 막힘, #17 B2b) · `REFUND_REJECTED` · `RESTORATION_UNCONFIRMED` · `RESTORATION_REJECTED` · `ORDER_STATUS_MISMATCH` 다
   (도메인 `ClaimRecoverySituation`). 화면은 name · description 을 그대로 보인다. 승인된 반품(#17 B2b)도 취소와 같은 처리 상황 · 버튼 플래그 · 수습 API 를 쓴다.
 - **반품 수습 (#17 B2b)** — 다시 시도는 반품 환불 실패를 `APPROVED`(환불 대기)로, 복원 실패를 `REFUNDED` 로 다시 연다. 결제 취소 키 기한 기준은 **승인 시각** + 14일이다.
@@ -1520,9 +1532,12 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
   실제로 복원됐을 수 있어 종결하지 않는다(409 `ORDER_041`, `completable=false` — 다시 시도로 확인한다). 주문 상태가 맞지 않아 닫힌 접수(`ORDER_STATUS_MISMATCH`)도
   종결 후보가 아니다(`completable=false`) — 주문이 취소 완료로 갈 경로가 없어 늘 409 였다. 수습 경로는 #695 다.
   재고를 맞추기 전에 product 쪽 복원 기록을 먼저 확인한다 — 특히 `PRODUCT_029`(같은 선점에 다른 복원 기록이 이미 있음)는 재고가 이미 돌아갔을 수 있어 그대로 조정하면 두 번 늘어난다.
-- **버튼 표시 (#17 A3)** — `refundConfirmable` 은 확정 버튼, `completable` 은 종결 버튼을 보일지다. 클레임만 본 판정이라 주문 상태가 맞지 않으면 실행 때 409 `ORDER_041` 일 수 있다.
-  세 플래그(`retryable` · `refundConfirmable` · `completable`)는 보는 사람 권한과 무관하다 — FE 는 역할(대표 = ADMIN · OWNER)로 확정 · 종결 버튼을 한 번 더 거른다.
-  `lastDecision` 은 마지막 확정 · 종결의 사유 · 시각이고 결정자 아이디 · 직전 실패 코드는 내지 않는다. 결정이 없으면 null 이다.
+- **버튼 표시 (#17 A3 · A4)** — `refundConfirmable` 은 확정 버튼, `completable` 은 종결 버튼, `cancellationRejectable` 은 취소 거절 버튼을 보일지다. 클레임만 본 판정이라
+  주문 상태가 맞지 않으면 실행 때 409 `ORDER_041` 일 수 있다. 결제사 거절 환불 실패에서는 `refundConfirmable` 과 `cancellationRejectable` 이 함께 true 다 — 대표가
+  결제 관리 화면을 보고 "환불됨 → 확정" 또는 "환불 없음 → 거절" 중 하나를 고른다.
+  네 플래그(`retryable` · `refundConfirmable` · `completable` · `cancellationRejectable`)는 보는 사람 권한과 무관하다 — FE 는 역할(대표 = ADMIN · OWNER)로 확정 · 종결 ·
+  취소 거절 버튼을 한 번 더 거른다.
+  `lastDecision` 은 마지막 확정 · 종결 · 거절의 사유 · 시각이고 결정자 아이디 · 직전 실패 코드는 내지 않는다. 결정이 없으면 null 이다.
   클레임 결정 칸은 **마지막 결정만 남는다** — 확정 뒤 종결하면 확정 사유 · 결정자는 덮인다. 결정 누적 원장은 후속 #694 다.
 - **확정 · 종결의 멱등 · 경합 (#17 A3)** — 헤더 멱등 키는 쓰지 않는다. 같은 화면 버전으로 두 번 보내면(더블클릭 · 재전송) 첫 요청이 버전을 올리므로 두 번째는 409 `ORDER_037` 이다 —
   FE 는 상세를 다시 읽어 `status` · `lastDecision` 으로 이미 처리됐는지 본다. 스케줄러 · 늦은 환불 결과 · 다른 운영자와 겹치면 `@Version` 저장에서 이긴 한쪽만 커밋하고 진 쪽은 409
@@ -1537,16 +1552,17 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 
 - 필터는 모두 선택적이고 함께 지정하면 AND다. 지원 값은 `type=RETURN|CANCELLATION`,
   `status=REQUESTED|APPROVED|REFUNDED|COMPLETED|REJECTED|REFUND_FAILED|RESTORATION_FAILED`다 (#16 PR-2a · #17 B1, 도메인 `Claim.Type` · `Claim.Status` 와 같은 집합 ·
-  같은 순서). 반품 접수는 아직 `REQUESTED`만 생긴다 — 반품 승인 `APPROVED` · 거절 `REJECTED` 는 B1 에서 값만 생기고 승인 · 거절 API(B2) 뒤에 행이 생긴다.
-  FE(#30 어드민 클레임 목록)는 두 값을 필터 · 상태 표시에 미리 더해도 된다(metadata `name` 은 "승인" · "거절"). 결제 후 취소 클레임은 #16 PR-2a-2 부터 생긴다.
+  같은 순서). 반품 승인 `APPROVED` · 거절 `REJECTED` 행은 반품 승인 · 거절 API(#17 B2c-2, #787 머지)부터 생기고, 결제 후 취소의 `REJECTED` 는 취소 거절(#17 A4)이
+  만든다(metadata `name` 은 "승인" · "거절"). `APPROVED` 는 반품만이다. 결제 후 취소 클레임은 #16 PR-2a-2 부터 생긴다.
   모르는 값은 400 `ORDER_198`이다. 필터에 맞는 접수의 claimId 내림차순으로 정렬하며 임의 정렬 입력은 받지 않는다.
 - `page`는 0부터, 기본 크기는 20이다. `page×size`는 2,147,483,647 이하여야 하고 초과 입력은 DB 조회 전에 400으로 거절한다. `totalElements`는 같은 조건의 실제 count이고 빈 페이지에서도 전체 건수를 보존한다. 목록은 헤더와 count만 조회하고 상세만 항목을 읽는다.
 - ID는 문자열, type/status/reason은 `{code,name,description}` metadata다. `expectedRefund`는 `{amount,currency}` 또는 미산정 `null`이며 null을 0원으로 표시하지 않는다.
-- UUID 멱등키·회원/배송 개인정보·워커 정보는 응답에 포함하지 않는다. 버전은 상세의 `recovery.version`(다시 시도 · 확정 · 종결의 화면 버전)으로만 낸다. 조회는 주문/접수 상태·이력·outbox를 변경하지 않고 외부 서비스를 호출하지 않는다.
-- 성공한 조회 뒤 `admin.audit`에 `CLAIM_SEARCH` 또는 `CLAIM_VIEW`를 남긴다. 다시 시도 · 수동 환불 확정 · 복원 생략 종결은 성공 · 거절 모두 `CLAIM_RETRY` · `CLAIM_REFUND_CONFIRM` ·
-  `CLAIM_COMPLETE`(대상 `claim:{id}`, success true/false)로 한 줄씩 남긴다. JWT 관리자 ID와 검증된 필터/대상만 기록하며 요청 원문·사유·항목·멱등키는 기록하지 않는다.
-- 취소 거절(A4), 반품 승인 · 거절 · 환불 API(B2)는 후속이다 — B1 은 저장 기반 · 환불 산식만이다(`order-flow-guide.md` §5 "반품 저장 기반 · 환불 산식").
-  반품 클레임은 다시 시도 · 확정 · 종결 대상이 아니다(409 `ORDER_038` · `ORDER_041`, B2 까지). 계약 리뷰어는 `seonghoho`다.
+- UUID 멱등키·회원/배송 개인정보·워커 정보는 응답에 포함하지 않는다. 버전은 상세의 `recovery.version`(다시 시도 · 확정 · 종결 · 반품 결정 · 취소 거절의 화면 버전)으로만 낸다. 조회는 주문/접수 상태·이력·outbox를 변경하지 않고 외부 서비스를 호출하지 않는다.
+- 성공한 조회 뒤 `admin.audit`에 `CLAIM_SEARCH` 또는 `CLAIM_VIEW`를 남긴다. 다시 시도 · 수동 환불 확정 · 복원 생략 종결 · 반품 승인 · 거절 · 결제 후 취소 거절은
+  성공 · 거절 모두 `CLAIM_RETRY` · `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` · `CLAIM_RETURN_APPROVE` · `CLAIM_RETURN_REJECT` · `CLAIM_CANCELLATION_REJECT`
+  (대상 `claim:{id}`, success true/false)로 한 줄씩 남긴다. JWT 관리자 ID와 검증된 필터/대상만 기록하며 요청 원문·사유·항목·멱등키는 기록하지 않는다.
+- 구현 범위 — 반품 승인 · 거절 API 는 #774 · #787(B2c), 승인된 반품의 다시 시도 · 확정 · 종결은 B2b, 결제 후 취소 거절은 #17 A4 PR-2 로 들어왔다. 승인 전(`REQUESTED`) ·
+  거절된 반품은 다시 시도 · 확정 · 종결 대상이 아니다(409 `ORDER_038` · `ORDER_041`). 계약 리뷰어는 `seonghoho`다.
 
 ### 2-17. 고객 주문 내역 · 결제 전 취소 · 구매 확정 · 반품 접수 (order-service, #16)
 
@@ -1557,13 +1573,16 @@ CUSTOMER는 403, 무토큰은 401이며 기존 order-service Gateway 경로와 �
 | `GET /api/v1/orders?page=0&size=20` | 200 `SliceResponse<{orderId, status, orderName, itemCount, totalAmount, cancelable, paymentDueAt, createdAt}>` — 최신순(주문 아이디 내림차순), 전체 건수 없음 | 400 `ORDER_144`(page) · `145`(size 1~100) |
 | `GET /api/v1/orders/{orderId}` | 200 `{orderId, status, cancelable, paymentDueAt, currency, items[], amounts, shipping, shippingAddress, createdAt}` — 주문 생성 응답과 같은 스냅숏 모양. `items[].orderItemId`(문자열, #609)는 반품 접수 본문에 그대로 쓴다 | 400 `ORDER_141` · 404 `ORDER_001` |
 | `GET /api/v1/orders/{orderId}/claims` (#609) | 200 `[{claimId, type, status, expectedRefund, requestedAt, items:[{orderItemId, quantity, reason}]}]` — 이 주문의 반품 · 결제 후 취소 접수, 아이디 내림차순 전체(페이지 없음), 없으면 `[]` | 400 `ORDER_141` · 404 `ORDER_001`(없거나 남의 주문) |
-| `POST /api/v1/orders/{orderId}/cancellation` `{reason}` | 200 현재 상세 — 결제 대기는 `CANCELED`. 결제 완료 · 상품 준비중(제작 중은 설정)은 환불이 확정되면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(#16 PR-2). 전체 취소는 남은 수량 전부다(#684 — 앞선 부분 취소가 있으면 남은 금액만 환불). 이미 취소 완료이거나, 전체 취소가 접수돼 취소 요청이면 바꾸지 않고 200 | 400 `ORDER_154`(사유 없음) · `100`(모르는 사유 · 깨진 JSON) · `141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 중 이후 · 만료 · 제작 중 불허 · 부분 취소만 진행 중인 취소 요청 등), `ORDER_025`(동시 변경 뒤 다시 판정 불가 — 상세를 다시 조회한 뒤 필요하면 다시 요청) · 500 `ORDER_033`(결제 완료 기록 없음) · `ORDER_034`(정산된 취소 환불 합 + 이번 환불액 ≠ 승인 금액, 또는 취소 클레임 데이터 이상) · 503 `ORDER_035`(결제 후 취소가 닫혀 있음 — 재시도 스케줄러 꺼짐, 고객센터 안내) · `ORDER_036`(확정 환불의 주문 DB 반영 미확인, 현재 상태 확인) |
+| `POST /api/v1/orders/{orderId}/cancellation` `{reason}` | 200 현재 상세 — 결제 대기는 `CANCELED`. 결제 완료 · 상품 준비중(제작 중은 설정)은 환불이 확정되면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(#16 PR-2). 전체 취소는 남은 수량 전부다(#684 — 앞선 부분 취소가 있으면 남은 금액만 환불). 이미 취소 완료이거나, 전체 취소가 접수돼 취소 요청이면 바꾸지 않고 200 | 400 `ORDER_154`(사유 없음) · `100`(모르는 사유 · 깨진 JSON) · `141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 중 이후 · 만료 · 제작 중 불허 · 부분 취소만 진행 중인 취소 요청 등), `ORDER_025`(동시 변경 뒤 다시 판정 불가 — 상세를 다시 조회한 뒤 필요하면 다시 요청), `ORDER_055`(운영자가 거절한 취소가 있는 주문의 재취소 — 고객센터 안내, #17 A4) · 500 `ORDER_033`(결제 완료 기록 없음) · `ORDER_034`(정산된 취소 환불 합 + 이번 환불액 ≠ 승인 금액, 또는 취소 클레임 데이터 이상) · 503 `ORDER_035`(결제 후 취소가 닫혀 있음 — 재시도 스케줄러 꺼짐, 고객센터 안내) · `ORDER_036`(확정 환불의 주문 DB 반영 미확인, 현재 상태 확인) |
 | `PATCH /api/v1/orders/{orderId}/purchase-confirmation` | 200 구매 확정된 상세. 이미 확정됐으면 바꾸지 않고 200 | 400 `ORDER_141` · 404 `ORDER_001` · 409 `ORDER_020`(배송 완료 전 · 반품 등), `ORDER_025`(다른 전이가 먼저 커밋) |
 
 - **취소 범위** — 결제 전(결제 대기 → 취소 완료)은 환불이 없고 잡아 둔 재고는 `order-canceled` 이벤트로 풀린다(`order-flow-guide.md` §1-1 · §3-5).
   결제 뒤(#16 PR-2)는 같은 API 로 전체 취소를 접수하고 전액 환불(배송비 포함) → 재고 복원을 자동으로 잇는다(어드민 승인 없음, `order-flow-guide.md` §5).
   응답은 요청 끝 시점의 상세라 `CANCEL_REQUESTED` 일 수 있다 — 화면은 "취소 처리 중"으로 보이고 다시 조회해 `CANCELED` 를 확인한다. 같은 요청을 다시 보내도 환불을
-  다시 부르지 않는다. 부분 취소 · 응답의 환불액 블록은 PR-2b, 반품 승인/환불 연계는 후속이다. 고객 부분 반품 접수는 아래 계약으로 제공한다. 구매 확정은 배송 완료 주문에서 가능하다.
+  다시 부르지 않는다. 부분 취소 · 응답의 환불액 블록은 PR-2b(#684)다. 반품 승인 · 환불은 운영자가 어드민 클레임 절(§2-16, #17 B2c)로 한다. 고객 부분 반품 접수는 아래 계약으로 제공한다. 구매 확정은 배송 완료 주문에서 가능하다.
+- **거절된 취소 (#17 A4)** — 결제사가 환불을 거절한 결제 후 취소를 대표가 무환불 확인 뒤 거절하면 주문은 취소 요청 전 상태(결제 완료 · 제작 중 · 상품 준비중)로
+  돌아가고 클레임 목록(`GET .../claims`)의 그 취소는 `status` "거절"(`REJECTED`)이다 — 거절 사유는 내지 않고 알림도 없다. 같은 주문을 다시 취소하면 409 `ORDER_055` 다
+  (주문 상태 판정 뒤, 결제 후 취소 게이트 503 `ORDER_035` 보다 먼저). 이 PR 까지는 그 주문의 `cancelable` 이 여전히 true 일 수 있다 — false 로 바꾸는 것은 #17 PR-3 이다.
 - **확정 환불 미기록(#17 A2a)** — `ORDER_036` 503은 취소 접수 롤백이나 환불 실패가 아니다. FE는 실패로 단정하거나 새 취소를 만들지 말고 현재 주문 상태를 확인한다.
   같은 요청 재전송은 원 claim의 현재 상세를 조회하며 환불을 재실행하지 않는다. 실제 환불 동기화 완료를 보장하는 응답은 아니다.
   기존 `ORDER_035` 게이트 기본값과 그 밖의 Runtime 처리 계약은 유지한다. 어드민 다시 시도 API(A2b)는 위 "어드민 클레임" 절이며 오류 계약 변경 리뷰어는 `seonghoho`다.

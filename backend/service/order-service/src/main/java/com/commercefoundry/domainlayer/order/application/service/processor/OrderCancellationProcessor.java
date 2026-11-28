@@ -71,8 +71,8 @@ public class OrderCancellationProcessor {
      * 재생은 된다. 부분 취소만 열려 있는 취소 요청이면 전체 취소를 받지 않는다({@code ORDER_STATUS_TRANSITION_INVALID}).
      *
      * @throws OrderException 없거나 남의 주문 {@code NOT_FOUND_ORDER} · 취소할 수 없는 상태 {@code ORDER_STATUS_TRANSITION_INVALID} ·
-     *     결제 후 취소가 닫힘 {@code CANCELLATION_UNAVAILABLE} · 결제 반영 기록 없음 {@code CANCELLATION_PAYMENT_MISSING} ·
-     *     환불액과 승인 금액 불일치 · 클레임 데이터 이상 {@code CANCELLATION_AMOUNT_MISMATCH}
+     *     거절된 취소가 있는 주문 {@code CANCELLATION_ALREADY_REJECTED}(#17 A4) · 결제 후 취소가 닫힘 {@code CANCELLATION_UNAVAILABLE} ·
+     *     결제 반영 기록 없음 {@code CANCELLATION_PAYMENT_MISSING} · 환불액과 승인 금액 불일치 · 클레임 데이터 이상 {@code CANCELLATION_AMOUNT_MISMATCH}
      */
     @Transactional(timeout = 5)
     public Requested request(long memberId, long orderId, OrderCancelReason reason) {
@@ -86,6 +86,10 @@ public class OrderCancellationProcessor {
         // 결제 대기는 결제 전 취소 경로다 — 이 흐름에 들어왔다면 판정 뒤 상태가 바뀐 것이라 거절한다
         if (order.status() == OrderStatus.PENDING_PAYMENT || !order.isCancelableByCustomer(properties.allowWhileMaking())) {
             throw new OrderException(OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID, order.status().getDisplayName());
+        }
+        // 운영자가 거절한 취소가 있는 주문이다(#17 A4) — 같은 결정적 키라 새로 넣으면 키 충돌(ORDER_025)이 영영 반복된다. 게이트 · 결제 대조보다 먼저 이유를 알린다
+        if (findCancellationClaim(orderId).filter(Claim::isRejectedCancellation).isPresent()) {
+            throw new OrderException(OrderErrorCode.CANCELLATION_ALREADY_REJECTED);
         }
         // 재시도 스케줄러가 꺼진 채 받으면 미확정 환불 · 복원이 영영 따라오지 않는다 — 접수 전에 닫는다
         if (!properties.paidCancellationOpen()) {
@@ -264,6 +268,11 @@ public class OrderCancellationProcessor {
 
     /** 환불 확정 반영 — 주문을 먼저 잠그고(두 유형 모두, §1-2) 유형별 정리로 넘긴다. */
     private Claim applyRefunded(Claim claim) {
+        if (claim.isRejectedCancellation()) {
+            // 운영자가 무환불 확인 뒤 거절한 취소(#17 A4)에 환불 성공이 왔다 — payment 봉인 뒤라 오면 안 되는 결과다. 기록하지 않고(아래 전이 예외) 고정 코드로 찾게 한다
+            log.error("CANCELLATION_REFUND_AFTER_REJECTION refund success arrived for a rejected cancellation. claimId={}, orderId={}, paymentId={}",
+                claim.id(), claim.orderId(), claim.paymentId());
+        }
         Order order = lockOrder(claim.orderId());
         return claim.type() == Claim.Type.RETURN ? applyReturnRefunded(claim, order) : applyCancellationRefunded(claim, order);
     }

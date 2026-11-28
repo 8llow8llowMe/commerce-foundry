@@ -15,6 +15,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositor
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelVoidQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderPayment;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
@@ -179,6 +180,38 @@ class OrderCancellationWebIntegrationTest {
         Order restorationFailed = create(OrderStatus.PAID, ids.generateId());
         assertThat(cancel(restorationFailed.id(), TestTokens.MEMBER_ID)).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("CANCELED");
         assertThat(claim(restorationFailed.id())).containsEntry("status", "RESTORATION_FAILED").containsEntry("failure_code", "PRODUCT_028");
+    }
+
+    /**
+     * #17 A4 — 운영자가 무환불 확인 뒤 거절한 취소가 있는 주문은 고객이 다시 취소해도 409 ORDER_055 다(결정적 키 충돌 ORDER_025 가 아니다). 새 클레임 · 환불 호출이 없고,
+     * 고객 클레임 목록에는 상태 "거절"만 보이고 사유는 보이지 않는다. 거절은 실제 어드민 API(대표 토큰 · 무환불 판정 스텁)로 만든다.
+     */
+    @Test
+    void customerCannotCancelAgainAfterAdminRejectedCancellation() {
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.rejected("PAYMENT_019"));
+        Order order = create(OrderStatus.PAID, ids.generateId());
+        assertThat(cancel(order.id(), TestTokens.MEMBER_ID)).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("CANCEL_REQUESTED");
+        long claimId = ((Number) claim(order.id()).get("id")).longValue();
+        long version = jdbc.queryForObject("select version from orders.claim where id = ?", Long.class, claimId);
+        when(paymentCancelPort.confirmNoRefund(anyLong(), anyLong(), anyLong(), any()))
+            .thenReturn(new PaymentCancelVoidQueryResult(PaymentCancelVoidQueryResult.Outcome.NO_REFUND_CONFIRMED, "CLAIM_REJECTED_BY_PG"));
+        String reason = "결제사 화면에서 환불 없음 확인";
+        String owner = TestTokens.issuer(Instant.now()).issueAccessToken(1, MemberRole.OWNER).tokenValue();
+        assertThat(mvc.post().uri("/api/v1/admin/claims/{claimId}/cancellation-rejection", claimId).header(HttpHeaders.AUTHORIZATION, "Bearer " + owner)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":" + version + ",\"reason\":\"" + reason + "\"}").exchange()).hasStatus(200);
+        assertThat(jdbc.queryForObject("select status from orders.orders where id = ?", String.class, order.id())).isEqualTo("PAID");
+
+        assertFailure(cancel(order.id(), TestTokens.MEMBER_ID), 409, "ORDER_055");
+
+        assertThat(jdbc.queryForObject("select count(*) from orders.claim where order_id = ?", Long.class, order.id())).isEqualTo(1L);
+        assertThat(claim(order.id())).containsEntry("status", "REJECTED");
+        assertThat(jdbc.queryForObject("select status from orders.orders where id = ?", String.class, order.id())).isEqualTo("PAID");
+        verify(paymentCancelPort, times(1)).cancel(anyLong(), anyLong(), any());
+        verifyNoInteractions(stockRestorationPort);
+        String token = TestTokens.issuer(Instant.now()).issueAccessToken(TestTokens.MEMBER_ID, MemberRole.CUSTOMER).tokenValue();
+        var claims = mvc.get().uri("/api/v1/orders/{orderId}/claims", order.id()).header(HttpHeaders.AUTHORIZATION, "Bearer " + token).exchange();
+        assertThat(claims).bodyJson().extractingPath("$.dataBody[0].status.code").isEqualTo("REJECTED");
+        assertThat(claims.getResponse().getContentAsByteArray()).asString(java.nio.charset.StandardCharsets.UTF_8).doesNotContain(reason);
     }
 
     @Test

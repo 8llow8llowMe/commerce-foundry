@@ -28,8 +28,8 @@ public class ClaimAdminPresenter {
             MoneyItems.of(claim.expectedRefund()), claim.requestedAt(), claim.items().stream()
                 .map(item -> new ClaimAdminLineItem(String.valueOf(item.orderItemId()), item.quantity(), item.reason().toMetadata())).toList(),
             new ClaimAdminRecoveryItem(recovery.situation().toMetadata(), recovery.nextAutomaticAttemptAt(), recovery.retryable(), recovery.refundConfirmable(),
-                recovery.completable(), decision == null ? null : new ClaimAdminRecoveryItem.DecisionItem(decision.reason(), decision.decidedAt()),
-                recovery.version()),
+                recovery.completable(), recovery.cancellationRejectable(),
+                decision == null ? null : new ClaimAdminRecoveryItem.DecisionItem(decision.reason(), decision.decidedAt()), recovery.version()),
             toApprovalItem(claim.returnApproval()), toDecisionItem(claim.returnDecision()));
     }
 

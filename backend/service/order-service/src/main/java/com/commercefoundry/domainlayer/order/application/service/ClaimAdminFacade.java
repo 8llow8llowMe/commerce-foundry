@@ -12,6 +12,8 @@ import com.commercefoundry.domainlayer.order.application.port.in.ClaimAdminUseCa
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminAuditProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminRecoveryProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimCancellationRejectionProcessor;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimCancellationVoidProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.ClaimReturnDecisionProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
@@ -24,10 +26,10 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 어드민 클레임 조회 · 결제 후 취소 다시 시도 · 수동 환불 확정 · 복원 생략 종결 · 반품 승인 · 거절 (#17). 다시 시도 · 수동 확정 · 반품 승인은 PG 환불 · 재고 복원
- * (원격 호출)이 이어져 <b>트랜잭션을 걸지 않는다</b> — 선점 · 확정 · 승인은 {@link ClaimAdminRecoveryProcessor} · {@link ClaimReturnDecisionProcessor} 의 짧은
- * 트랜잭션, 원격 구간은 고객 취소 · 재시도 스케줄러와 같은
- * {@link OrderCancellationPipelineProcessor} 다.
+ * 어드민 클레임 조회 · 결제 후 취소 다시 시도 · 수동 환불 확정 · 복원 생략 종결 · 반품 승인 · 거절 · 결제 후 취소 거절 (#17). 다시 시도 · 수동 확정 · 반품 승인은
+ * PG 환불 · 재고 복원(원격 호출)이, 취소 거절은 payment 무환불 판정(원격 호출)이 이어져 <b>트랜잭션을 걸지 않는다</b> — 선점 · 확정 · 승인 · 거절은
+ * {@link ClaimAdminRecoveryProcessor} · {@link ClaimReturnDecisionProcessor} · {@link ClaimCancellationRejectionProcessor} 의 짧은 트랜잭션, 원격 구간은 고객 취소 ·
+ * 재시도 스케줄러와 같은 {@link OrderCancellationPipelineProcessor} 와 무환불 판정 {@link ClaimCancellationVoidProcessor} 다.
  * 원격이 성공한 뒤의 롤백으로 "PG 는 취소했는데 DB 는 모르는" 창을 만들지 않으려고 둘을 나눈다.
  */
 @Slf4j
@@ -42,6 +44,8 @@ public class ClaimAdminFacade implements ClaimAdminUseCase {
     private final ClaimAdminPresenter presenter;
     private final ClaimAdminAuditProcessor audit;
     private final ClaimReturnDecisionProcessor returnDecisionProcessor;
+    private final ClaimCancellationRejectionProcessor cancellationRejectionProcessor;
+    private final ClaimCancellationVoidProcessor cancellationVoidProcessor;
 
     @Override
     public PageResponse<ClaimAdminItem> getClaims(ClaimAdminFilter filter, long adminId) {
@@ -134,6 +138,40 @@ public class ClaimAdminFacade implements ClaimAdminUseCase {
         }
         audit.returnRejected(adminId, claimId, true);
         return presenter.toResponse(processor.getDetail(claimId));
+    }
+
+    /**
+     * 결제 후 취소 거절 (#17 A4) — 자격 확인(tx1, 읽기 전용) → payment 무환불 판정 1회(트랜잭션 밖) → 거절 기록(tx2, 주문 NOWAIT 잠금 · 재판정 · 저장) →
+     * 현재 상세. 판정은 PG 잔액 조회를 기다리는 원격 호출이라 그동안 DB 커넥션 · 주문 잠금을 쥐지 않으려고 트랜잭션을 단계별 Processor 로 나눈다.
+     * 자격을 통과한 뒤에만 판정을 부르고(결과 미확인 클레임이 봉인되면 다시 시도 경로가 막힌다), 무환불 확정이 아니면 tx2 를 부르지 않는다.
+     * 재고 복원 · 환불 경로({@link OrderCancellationPipelineProcessor})는 부르지 않는다. 처리 횟수를 세지 않는다 — 거절은 자동 처리 대상이 아니다.
+     */
+    @Override
+    public ClaimAdminResponse rejectCancellation(long claimId, long expectedVersion, String reason, long adminId) {
+        try {
+            Claim eligible = cancellationRejectionProcessor.prepare(claimId, expectedVersion);
+            cancellationVoidProcessor.confirmNoRefund(eligible);
+            recordRejection(eligible, expectedVersion, reason, adminId);
+        } catch (RuntimeException exception) {
+            audit.cancellationRejected(adminId, claimId, false);
+            throw exception;
+        }
+        audit.cancellationRejected(adminId, claimId, true);
+        return presenter.toResponse(processor.getDetail(claimId));
+    }
+
+    /**
+     * payment 가 이미 무환불을 봉인한 뒤의 거절 기록(tx2). 여기서 지면 payment 는 봉인됐는데 order 는 거절을 남기지 못한 상태다 — 상세를 다시 읽어 다시 거절하면
+     * payment 가 같은 판정(확정)을 다시 주므로 그대로 끝난다. 그 사이 다른 대표가 환불 완료로 확정했다면 결제 관리 화면과 대조한다(#693). 그래서 예외는 바꾸지 않고 그대로 내고, 어느 클레임인지만 warn 으로 남긴다.
+     */
+    private void recordRejection(Claim sealed, long expectedVersion, String reason, long adminId) {
+        try {
+            cancellationRejectionProcessor.reject(sealed.id(), expectedVersion, reason, adminId);
+        } catch (RuntimeException exception) {
+            log.warn("cancellation no refund sealed in payment but rejection not recorded. claimId={}, orderId={}, paymentId={}, error={}", sealed.id(),
+                sealed.orderId(), sealed.paymentId(), exception.getClass().getSimpleName());
+            throw exception;
+        }
     }
 
     private void progress(Claim held) {

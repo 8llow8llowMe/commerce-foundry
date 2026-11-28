@@ -67,7 +67,8 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
   환불 거절 주문은 `CANCEL_REQUESTED` 로 남고 출고하지 않는다. 출구는 운영자 수동 환불 확정 · 재시도(#17 A1 · §5)와 **결제 후 취소 거절**(#17 A4)이다.
   취소 거절은 payment 무환불 판정이 `NO_REFUND_CONFIRMED` 일 때만 `Order#rejectCancellation` 으로 상태 이력의 직전 상태(결제 완료 · 제작 중 · 상품 준비중)로 돌린다
   — 돈이 나갔을 수 있으면(결과 미확인 `REFUND_UNCONFIRMED` 포함) 돌아가는 길은 없다. 표의 `CANCEL_REQUESTED → PAID` 중 부분 취소 정리(`Order#settleCancellation`)는
-  **환불이 확정된 뒤**의 정리다(§1-4). 거절 API · 조건 · 순서는 #17 A4 PR-2 에서 이 문서에 적는다.
+  **환불이 확정된 뒤**의 정리다(§1-4). 거절 API · 조건(R1~R8) · 순서 · 실패 코드는 §5 "결제 후 취소 거절 (#17 A4)" 이다. 거절된 취소가 있는 주문을 고객이 다시
+  취소하면 409 `ORDER_055` 다(주문 상태 판정 뒤, 게이트 503 `ORDER_035` 앞).
 - **결제 전 취소** (`Order#cancelBeforePayment`): 상태 · `CUSTOMER` 이력(사유 = 취소 사유 코드) · `order-canceled` outbox 를 한 트랜잭션으로 쓴다(§3-5).
   이미 취소됐으면 아무것도 쓰지 않고 성공이다. 읽은 뒤 결제 완료 · 만료가 먼저 커밋하면 `@Version` 비교로 롤백하고 다시 읽는다 — 취소 완료면 200,
   결제 완료 · 상품 준비중 · 제작 중이면 결제 후 취소로 넘기고(#16 PR-2), 그 밖(만료 등)은 409 `ORDER_020` 이다.
@@ -120,6 +121,8 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
   잠금에서 지면 기다리지 않고 잠금 예외다(반품 환불 기록은 503 `ORDER_036` → 같은 클레임 재전송, §5 B2a).
   **결제 후 취소도 같다(#684 PR-2)** — 한 주문에 취소 클레임이 여럿일 수 있어 환불 기록(tx2) · 수동 환불 확정이 주문을 먼저 NOWAIT 으로 잠근 뒤 클레임 목록으로 정리를
   판정한다. 접수(tx1)는 원래 주문 잠금이다. tx2 가 잠금에서 지면 503 `ORDER_036`(클레임은 lease 로 남아 스케줄러가 같은 클레임으로 다시 보낸다)이고, 수동 확정은 409 `ORDER_037` 이다.
+  **결제 후 취소 거절(#17 A4)** 의 거절 기록(tx2)도 같은 순서다 — 주문을 먼저 NOWAIT 으로 잠근 뒤 같은 주문의 클레임 · 이력 · 결제 기록을 다시 읽어 판정한다(지면 409
+  `ORDER_037`). 자격 확인(tx1)은 잠그지 않는다. 수동 환불 확정과 거절이 같은 순서(주문 → 클레임)로 잠가 서로 교착하지 않는다.
 - 같은 결제 승인 이벤트는 다시 올 수 있다(릴레이 재발행 · 컨슈머 재전달) — inbox(`orders.processed_event`)가 같은 eventId 를 거르고, 다른 eventId 의 같은 결제는
   `order_payment.payment_id` 유니크가 막는다. 이미 그 결제로 `PAID` 이후 상태면 아무것도 바꾸지 않는다. 재전송 스케줄러는 없다(`payment-guide.md` §6).
 
@@ -227,8 +230,10 @@ PR 분할과 이 절의 범위:
 - 취소 클레임의 `PAYMENT_016`(겹침)은 지금 거절로 분류된다. 앞 부분 취소를 수동 확정해 payment 원장이 PENDING 으로 남은 드문 경우다 — #693 order 2단계와 함께 정한다.
   "결제 후 취소는 주문당 하나라 겹침이 없다"(`Claim#isRefundWaiting` 의 옛 전제)는 한 주문에 취소가 여럿이면 맞지 않는다. **PR-4 머지 조건: 취소의 `PAYMENT_016` 도
   반품처럼 대기(막힘 — 다시 시도가 정본 경로)로 본다**(#17 B2b 와 같게, 중추 결정 2026-11-29 — 환불 없이 `CANCELED` 가 되는 경로를 막는다. PR-2 는 동작을 바꾸지 않았다).
-- 취소 거절(A4)은 도메인 전이(`Claim#rejectCancellation` · `Order#rejectCancellation`)와 payment 무환불 판정 호출 포트까지만 있고 어드민 API 가 아직 없다(#17 A4 PR-2).
-  그때까지 결제사가 종결 거절하면 출구는 수동 환불 확정뿐이다.
+  A4 거절 후보도 `PAYMENT_016` 을 결제사 거절로 보고 있으니, PR-4 가 이것을 대기로 바꾸면 거절 후보에서도 빠진다(결과 미확인처럼 다시 시도가 정본 경로).
+- 취소 거절(A4)의 어드민 API 는 #17 A4 PR-2 로 들어왔다(§5 "결제 후 취소 거절"). 거절은 같은 주문에 다른 열린 취소가 없고(R5) 이력 최신 행이 직전 상태 → 취소 요청(R6)일
+  때만이다 — 부분 취소가 정리돼 결제 완료로 돌아간 뒤의 새 전체 취소도 같은 조건으로 판정한다. 거절된 취소가 있는 주문의 고객 재취소는 결정적 전체 취소 키의
+  클레임으로 막는다(409 `ORDER_055`). 고객 부분 취소 API(PR-4)는 거절된 전체 취소가 있는 주문을 어떻게 다룰지 그 PR 에서 정한다.
 - **PR-4 머지 조건: 데이터 이상(`RESTORATION_FAILED(ORDER_STATUS_UNEXPECTED)`)으로 `CANCEL_REQUESTED` 에 갇힌 부분 취소는 ERROR 로그 + 지표로 경보한다**
   — 수습 절차는 #695 다.
 - PR-3 전까지 `ReturnRefundPolicy` 는 거절이 아닌 취소 클레임이 있으면 예외를 던진다. 고객 부분 취소 API(PR-4) 전이라 운영 동작에는 영향이 없다.
@@ -1200,7 +1205,7 @@ B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지
   | `REQUESTED` | 환불 대기 | 환불 200 → `REFUNDED`(+ 주문 잠금 뒤 취소 정리 — 전량 `CANCELED`, 일부 `PAID`, §1-4), 종결 거절 → `REFUND_FAILED`(원격 코드), 미확정 → 백오프 재시도. 환불 200 인데 주문이 취소 요청 · 취소 완료가 아니거나 정리 판정이 불가능하면(데이터 이상) 복원 없이 `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`) — 환불 기록은 남고 주문은 그대로 |
   | `REFUNDED` | 환불 확정, 재고 복원 대기 | 복원 200 → `COMPLETED`, 종결 409 → `RESTORATION_FAILED`(`PRODUCT_027/028/029/003` — 원격 코드, 환불의 `PAYMENT_*` 와 같은 방식), 클레임 항목이 주문 스냅숏과 안 맞으면 `RESTORATION_DATA_INVALID`, 그 밖 → 백오프 재시도 |
   | `COMPLETED` | 끝 | — |
-  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다. 어드민 다시 시도(#17 A2b, 기한 안의 `REFUND_UNCONFIRMED` 만) → `REQUESTED`. 대표의 수동 환불 확정(#17 A3, 결제사 거절 · 기한이 지난 `REFUND_UNCONFIRMED`) → `REFUNDED`(+ 주문 잠금 뒤 취소 정리 — 전량 `CANCELED`, 일부 `PAID`, PG 호출 없음) |
+  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다. 어드민 다시 시도(#17 A2b, 기한 안의 `REFUND_UNCONFIRMED` 만) → `REQUESTED`. 대표의 수동 환불 확정(#17 A3, 결제사 거절 · 기한이 지난 `REFUND_UNCONFIRMED`) → `REFUNDED`(+ 주문 잠금 뒤 취소 정리 — 전량 `CANCELED`, 일부 `PAID`, PG 호출 없음). 대표의 취소 거절(#17 A4, 결제사 거절 + payment 무환불 확정) → `REJECTED`(+ 주문 잠금 뒤 이력의 직전 상태, 환불 · 복원 없음) |
   | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 정리된 상태(전량 `CANCELED`, 일부 수량이면 `PAID` 로 돌아간 뒤 진행 중인 상태. `ORDER_STATUS_UNEXPECTED` 면 정리 전 그대로) | 어드민 다시 시도(#17 A2b) → `REFUNDED`(정리를 다시 부르지 않는다). `ORDER_STATUS_UNEXPECTED` 는 다시 시도 · 종결하지 않는다(수습 경로는 #695). 대표의 복원 생략 종결(#17 A3, 확정 실패 코드 + 주문 전 수량 취소면 주문 `CANCELED`, 일부 수량 취소는 주문 상태 무관) → `COMPLETED` |
 
   - **종결 실패 수습** — 종결 실패를 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를 error 로그로 남기고(금액 제외), 운영자는 어드민 클레임 목록
@@ -1216,7 +1221,7 @@ B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지
     lease 안(자동 처리 중)은 409 `ORDER_039`, 버전 불일치 · 저장 경합은 409 `ORDER_037` 이라 스케줄러 · 고객 · 다른 운영자와 겹쳐도 원격은 한 번만 나간다.
     재시도 스케줄러가 꺼져 있으면 503 `ORDER_040` 이다(다시 연 뒤 미확정을 따라갈 쪽이 없다). 원격 단계가 반영 없이 끊기면 스케줄러처럼 미확정 한 번으로 센다.
     다시 시도는 무환불을 확정하지 않는다. CAS 경합(저장 직전에 멈춘 쪽이 다른 운영자 · 스케줄러의 커밋 뒤 지는 경로)은 `ClaimAdminRetryWebIntegrationTest` 가 래치로 직접 만든다.
-    취소 거절(A4)의 어드민 API 는 PR-2 다(도메인 전이 · 무환불 판정 포트는 PR-1).
+    결제사가 거절한 환불 실패의 또 다른 출구인 취소 거절(A4)은 아래 "결제 후 취소 거절 (#17 A4)" 절이다(도메인 전이 · 무환불 판정 포트 PR-1, 어드민 API PR-2).
   - **수동 환불 확정 (#17 A3, `POST /api/v1/admin/claims/{claimId}/refund-confirmation`, `SETTLEMENT_MANAGE` — 대표만)** — 대표가 PG · 결제 관리 화면에서 환불을
     확인한 `REFUND_FAILED` 를 `ClaimAdminRecoveryProcessor.confirmRefund` 가 한 트랜잭션에서 바꾼다 — 화면 버전 대조 → 주문 조회 →
     `ClaimAdminRecoveryPolicy.requireRefundConfirmation(claim, order, refundRetryClosed)`(같은 저장 주문 · 주문 `CANCEL_REQUESTED`|`CANCELED` · 결제사 거절이거나
@@ -1388,6 +1393,82 @@ B2c-2 라 그 전까지 호출부는 스케줄러뿐이고 실제로 도는 행�
   `ClaimAdminControllerTest`(권한 · 본문 검증 171~173), `OrderAdminAuthorizationMappingTest`, `ClaimAdminDecisionWebIntegrationTest`(실제 체인: 승인 → 환불 · 복원 → 주문 배송 완료,
   금액 불일치 046, 거절 → `ADMIN` 이력, 재전송 037), `ClaimReturnDecisionContract`(H2 · PostgreSQL: 승인 칸 저장 · 주문 그대로, 낡은 버전 · 이미 결정 · 진행 중 반품,
   거절 결정 칸 · 주문 정리 · 이력, 결제 기록 없음), `ClaimReturnDecisionPostgresTest`(주문 잠금 경합 → 2초 안에 037 → 풀린 뒤 같은 화면으로 성공).
+
+### 결제 후 취소 거절 (#17 A4)
+
+결제사가 환불을 종결 거절해 멈춘 결제 후 취소(`REFUND_FAILED`)를 대표가 끝내고, 주문을 취소 요청 전 상태로 되돌려 다시 출고하게 한다. 설계 정본은 #17 댓글
+"A4 결제 후 취소 거절 — 설계 확정 · 결정 (2026-11-28)" 이다. PR-1 은 도메인 전이(`Claim#rejectCancellation` · `Order#rejectCancellation`) · 자격 정책
+(`ClaimAdminRecoveryPolicy`) · payment 무환불 판정 포트(`PaymentCancelPort#confirmNoRefund`), PR-2 는 어드민 API · 오류 코드 · 고객 재취소 차단, PR-3 은 고객
+`cancelable` 반영이다. DDL 은 없다 — 취소 + `REJECTED` + 결정의 직전 실패 코드는 기존 check 제약(`ck_claim_admin_decision` 등)이 이미 받는다.
+
+`POST /api/v1/admin/claims/{claimId}/cancellation-rejection` `{expectedVersion, reason}` — 권한 `SETTLEMENT_MANAGE`(대표만, `security-guide.md` §3-1), 감사
+`CLAIM_CANCELLATION_REJECT`, 응답은 다시 읽은 상세 200 이다(`api-design-guide.md` §2-16). 반품 거절(`return-rejection`, `ORDER_MANAGE`)과 권한이 달라 경로를 나눈다.
+
+**거절 조건** — 모두 만족해야 한다. R1 · R2 는 상세의 `recovery.cancellationRejectable` 과 같은 판정이다(상세는 payment 를 부르지 않는다).
+
+| 조건 | 내용 | 판정 |
+|------|------|------|
+| R1 | 저장된 취소 클레임이 `REFUND_FAILED` 이고 실패 코드가 결과 미확인(`REFUND_UNCONFIRMED`)이 아니다 — 결제사 종결 거절 | `ClaimAdminRecoveryPolicy#isCancellationRejectionCandidate` |
+| R2 | 다음 시도 시각이 없다(자동 처리가 쥐고 있지 않다) | 같다 |
+| R3 | 화면 버전(`expectedVersion`)이 지금 저장된 클레임 버전과 같다 | Processor(tx1 · tx2 모두) |
+| R4 | 같은 저장 주문이 `CANCEL_REQUESTED` 다 | `requireCancellationRejection` |
+| R5 | 같은 주문에 이 클레임 밖의 열린 취소(환불 대기 · 환불 실패)가 없다 | 같다 |
+| R6 | 주문 상태 이력의 최신 행(`findHistories` 아이디 오름차순의 마지막)이 결제 완료 · 제작 중 · 상품 준비중 → 취소 요청이다 — 되돌릴 상태가 이 행의 이전 상태다 | 같다 |
+| R7 | 주문의 결제 완료 기록(`order_payment` PAID)의 결제 아이디가 클레임의 결제 아이디와 같다 | 같다 |
+| R8 | payment 무환불 판정(void)의 `outcome` 이 `NO_REFUND_CONFIRMED`(payment 가 봉인)다 — 결제사 거절 코드(016 · 017 · 019)는 무환불 증거가 아니다 | `ClaimCancellationVoidProcessor` |
+
+**순서** — Facade(`ClaimAdminFacade#rejectCancellation`)는 트랜잭션을 걸지 않는다. void 는 PG 잔액 조회를 기다리는 원격 호출이라 DB 커넥션 · 주문 잠금을 쥔 채 부르지 않는다.
+
+1. **tx1 자격 확인**(`ClaimCancellationRejectionProcessor#prepare`, 읽기 전용 · 잠금 없음) — 클레임 없음 404 `ORDER_032` → 버전 불일치 409 `ORDER_037` → R1 · R2 →
+   주문(없으면 데이터 이상 error) R4 → 같은 주문 클레임 목록 R5 → 결제 완료 기록(없으면 데이터 이상 error) R7 → 이력 최신 행 R6. 자격 미달은 모두 409 `ORDER_041` 이다.
+   클레임만으로 후보가 아니면 주문을 읽지 않고, 주문이 취소 요청이 아니면 클레임 목록 · 결제 기록 · 이력을 읽지 않는다. R5 · R6 · R7 은 읽은 값을 정책에 한 번에 넘긴다.
+   **이 단계를 통과한 뒤에만 void 를 부른다** — 결과 미확인 클레임에 void 를 부르면 payment 가 봉인해 다시 시도 경로(같은 claimId 의 결제 취소)가 막힌다.
+2. **void 1회**(`ClaimCancellationVoidProcessor`, `Propagation.NEVER`) — 본문은 클레임에 저장된 결제 · 주문 · 클레임 아이디 · 환불액이다. 분기는 `outcome` 만 보고 사유 코드는
+   로그 전용이다. `NO_REFUND_CONFIRMED` 가 아니면 tx2 를 부르지 않는다. 이 포트를 부르는 main 클래스는 이 Processor 하나다(`OrderServiceArchitectureTest` ArchUnit).
+   포트 결과에 `sealed` 가 없어 "미확인인데 봉인" 은 order 가 따로 로그로 가르지 않는다(#693 대상, `payment-guide.md` §8-1 "실패 · 수습").
+3. **tx2 거절 기록**(`ClaimCancellationRejectionProcessor#reject`, 5초) — 클레임을 다시 읽어 버전 · R1 · R2 를 다시 본다(tx1 결과에 기대지 않는다) → **주문 NOWAIT 잠금**
+   (`findByIdForUpdate`, 지면 409 `ORDER_037`) → R4~R7 재판정(정본) → `Claim#rejectCancellation(Decision(사유, 관리자, now, 직전 실패 코드))` 저장(낙관락 037) →
+   `Order#rejectCancellation(정책 반환값)` + `OrderStatusHistory.changedByAdmin(…, 관리자, 사유)` 저장(낙관락 037). 한 트랜잭션이라 주문 저장이 지면 클레임 거절도 롤백된다.
+   잠금 순서 · 방식은 반품 결정과 같다(§1-2). Processor 는 정책이 돌려준 상태만 주문 복귀에 넘긴다. tx2 가 실패하면 Facade 가 warn(결제 · 클레임 아이디,
+   "무환불 봉인됨 · 거절 미기록")을 남기고 예외를 그대로 낸다 — 상세를 다시 읽어 다시 거절하면 payment 가 같은 판정을 다시 주어 끝난다. 그 사이 다른 대표가
+   환불 완료로 확정했다면(다시 읽어도 041) 결제 관리 화면과 대조한다(payment 는 `VOIDED`, #693 "한계").
+4. 감사 한 줄(성공 · 실패) → 상세 재조회 200.
+
+거절은 재고 복원 · 환불을 하지 않는다 — 거절 Processor 는 재고 복원 포트를 주입받지 않고 결제 취소(`PaymentCancelPort#cancel`)도 부르지 않는다. 거절된 취소는
+취소 수량 합(`Claim#reservesCancellationQuantity`)에서 빠지고, 재시도 스케줄러는 다음 시각이 없어 집지 않는다. 다시 시도는 409 `ORDER_038`, 수동 환불 확정 · 다시 거절은
+409 `ORDER_041` 이다(주문이 취소 요청이 아니고 클레임이 후보가 아니다). 재시도 스케줄러 게이트(`ORDER_040`)는 걸지 않는다 — 이어지는 자동 단계가 없다.
+
+**실패 표**
+
+| 경우 | 응답 | 클레임 · 주문 |
+|------|------|---------------|
+| 없는 클레임 | 404 `ORDER_032` | 그대로 |
+| 버전 불일치(같은 화면 재전송 포함) · 주문 잠금 경합 · 저장 낙관락 | 409 `ORDER_037` | 그대로(tx2 롤백) |
+| R1 · R2 · R4~R7 미달(결과 미확인 · 자동 처리 중 · 주문 상태 · 다른 열린 취소 · 이력 · 결제 기록) | 409 `ORDER_041` — void 를 부르지 않는다 | 그대로 |
+| void `REFUNDED` — order 는 환불 실패, payment 는 환불 확정(이미 갈라진 상태, warn) | 409 `ORDER_052` — 결제 관리 화면에서 확인 뒤 환불 완료로 확정 | 그대로 |
+| void `UNCONFIRMED` | 409 `ORDER_053` — 잠시 뒤 다시, 계속되면 결제 관리 화면 확인 | 그대로 |
+| void `UNAVAILABLE` · 호출 예외(서비스 토큰 등) | 503 `ORDER_054` — 잠시 뒤 다시 | 그대로 |
+| 본문 검증 | 400 `ORDER_169` · `170` · `148` · `151`, claimId `ORDER_166` | 그대로 |
+
+**고객 재취소 차단 (055)** — `OrderCancellationProcessor#request` 는 주문 잠금 · 상태 판정 뒤, 게이트(503 `ORDER_035`) · 결제 대조 앞에서 이 주문의 취소 클레임
+(결정적 전체 취소 키)이 거절된 취소(`Claim#isRejectedCancellation`)면 409 `ORDER_055` 를 낸다. 전에는 같은 결정적 키의 INSERT 가 충돌해 409 `ORDER_025`(동시 변경)가
+영구히 나왔다. 고객에게는 클레임 상태 "거절"만 보이고 사유는 보이지 않으며 알림은 없다. 고객 `cancelable` 은 PR-3 에서 false 로 바꾼다(그 전까지 true 일 수 있다).
+
+**늦은 환불 성공** — 거절된 취소에 환불 성공이 도착하면(봉인 뒤라 오면 안 된다 — 거절 전에 이미 나가 있던 결제 취소 응답 등) 확정 환불 기록 경로
+(`OrderCancellationProcessor#applyRefunded`)가 고정 코드 `CANCELLATION_REFUND_AFTER_REJECTION` 으로 error 로그(클레임 · 주문 · 결제 아이디)를 남기고 기록하지 않는다
+(전이 예외 → 파이프라인 503 `ORDER_036`). 운영자는 그 코드로 찾아 결제 관리 화면과 대조한다.
+
+**한계** — 대조할 수 없는 결제(가상계좌 · USD · 결제키 없음)는 void 가 늘 `UNCONFIRMED`(`PG_CHECK_UNSUPPORTED`)라 거절할 수 없다 — 출구는 수동 환불 확정이고,
+대표의 수동 "환불 없음" 확정 경로는 후속이다. 같은 클레임에 수동 환불 확정과 거절이 겹치면 클레임 `@Version` 저장에서 한쪽만 이긴다 — 거절이 지면 payment 는 봉인됐는데
+order 는 환불 완료가 된다(수동 확정은 payment 에 알리지 않는 기존 한계, #693). 클레임 결정 칸은 마지막 결정만 남는다(#694).
+
+시험 — `ClaimCancellationRejectionProcessorTest`(판정 순서 · 읽기 범위, 이력 불일치 · 다른 열린 취소 · 결제 기록 불일치 041, 잠금 · 낙관락 037, 정책 반환값 전달, 복원 · 결제 취소
+포트 미주입), `ClaimCancellationVoidProcessorTest`(outcome 네 가지 · 포트 예외 매핑, `NEVER`), `OrderServiceArchitectureTest`(무환불 판정 유일 호출), `ClaimAdminFacadeTest`(자격 실패면 void 무호출, 확정이 아니면
+tx2 무호출, 감사 성공 · 실패, 복원 · 결제 취소 무호출), `ClaimAdminControllerTest`(ADMIN · OWNER 200, MANAGER · STAFF · 고객 403, 무토큰 401, 본문 400),
+`OrderAdminAuthorizationMappingTest`, `ClaimAdminDecisionWebIntegrationTest`(PAID · PREPARING · MAKING 복귀 · ADMIN 이력, void 052 · 053 · 054 불변, 결과 미확인 041 + void 무호출,
+주문 저장 낙관락 → 클레임 롤백, 재전송 037, 거절 뒤 038 · 041, MANAGER 403), `OrderCancellationWebIntegrationTest`(어드민 거절 뒤 고객 재취소 055 · 사유 비노출),
+`OrderCancellationProcessorTest`(055 가 게이트 앞 · 상태 판정 뒤, 늦은 환불 성공 미기록), `ClaimCancellationRejectionContract`(H2 · PostgreSQL: 거절 행 check 제약 통과 ·
+취소 수량 제외 · 재전송 037 · 재거절 041 · 고객 재취소 055), `ClaimCancellationRejectionPostgresTest`(주문 잠금 경합 → 2초 안에 037 → 풀린 뒤 성공).
 
 ## 6. 어드민 운영 화면이 보는 것
 

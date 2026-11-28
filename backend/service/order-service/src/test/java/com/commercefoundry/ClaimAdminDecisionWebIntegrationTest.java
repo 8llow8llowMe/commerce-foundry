@@ -21,6 +21,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositor
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelVoidQueryResult;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.ClaimItem;
@@ -38,6 +39,9 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -54,7 +58,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 어드민 수동 환불 확정 · 복원 생략 종결 (#17 A3) · 반품 승인 · 거절 (#17 B2c-2) — 실제 JWT · 권한 · Facade · 단계별 트랜잭션 · H2 를 관통하고 payment · product 호출만 스텁한다.
+ * 어드민 수동 환불 확정 · 복원 생략 종결 (#17 A3) · 반품 승인 · 거절 (#17 B2c-2) · 결제 후 취소 거절 (#17 A4) — 실제 JWT · 권한 · Facade · 단계별 트랜잭션 · H2 를
+ * 관통하고 payment(환불 · 무환불 판정) · product 호출만 스텁한다.
  * 스텁은 실제 PG 환불의 증거가 아니다. 테스트 값은 모두 가짜다.
  *
  * <p>애노테이션 · 빈 대체(필드 이름까지)는 {@code ClaimAdminRetryWebIntegrationTest} · {@code OrderCancellationWebIntegrationTest} 와 같아 Spring 컨텍스트 캐시를
@@ -382,5 +387,187 @@ class ClaimAdminDecisionWebIntegrationTest {
             .header(HttpHeaders.AUTHORIZATION, bearer(1, MemberRole.MANAGER)).contentType(MediaType.APPLICATION_JSON).content(body).exchange();
         assertThat(replay).hasStatus(409);
         assertThat(replay).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_037");
+    }
+
+    // ---- 결제 후 취소 거절 (#17 A4) ----
+
+    private static final String REJECTION_REASON = "결제사 화면에서 환불 없음 확인, 고객과 통화해 출고 진행";
+
+    private void voidAnswers(PaymentCancelVoidQueryResult.Outcome outcome, String reasonCode) {
+        when(paymentCancelPort.confirmNoRefund(anyLong(), anyLong(), anyLong(), any())).thenReturn(new PaymentCancelVoidQueryResult(outcome, reasonCode));
+    }
+
+    private MvcTestResult rejectCancellation(long claimId, long expectedVersion, MemberRole role) {
+        return mvc.post().uri("/api/v1/admin/claims/{claimId}/cancellation-rejection", claimId).header(HttpHeaders.AUTHORIZATION, bearer(1, role))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":" + expectedVersion + ",\"reason\":\"" + REJECTION_REASON + "\"}").exchange();
+    }
+
+    private long paymentIdOf(long orderId) {
+        return jdbc.queryForObject("select payment_id from orders.order_payment where order_id = ? and result = 'PAID'", Long.class, orderId);
+    }
+
+    /**
+     * 취소 요청 전 상태({@code before})에서 결제사가 거절한 취소를 만든다. 결제 완료 · 상품 준비중은 그 상태에서 고객이 취소하고, 제작 중은 이 컨텍스트가
+     * 제작 중 취소를 열지 않아(설정 기본값) 결제 완료에서 취소한 뒤 이력의 직전 상태만 제작 중으로 바꾼다 — 거절은 주문이 아니라 이력 최신 행으로 되돌릴 상태를 정한다.
+     */
+    private long rejectedRefundFrom(Order order, OrderStatus before) {
+        if (before == OrderStatus.PREPARING) {
+            jdbc.update("update orders.orders set status = 'PREPARING', version = version + 1 where id = ?", order.id());
+        }
+        long claimId = rejectedRefundClaim(order);
+        if (before == OrderStatus.MAKING) {
+            jdbc.update("update orders.order_status_history set from_status = 'MAKING' where order_id = ? and to_status = 'CANCEL_REQUESTED'", order.id());
+        }
+        return claimId;
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(value = OrderStatus.class, names = {"PAID", "PREPARING", "MAKING"})
+    @DisplayName("취소 거절 — 결제사가 환불 없음을 확정하면 클레임 REJECTED, 주문은 이력의 직전 상태로 돌아가고 ADMIN 이력에 사유가 남는다. 환불 · 재고 복원은 부르지 않는다")
+    void cancellationRejectionRestoresPreviousStatus(OrderStatus before) {
+        Order order = paidOrder();
+        long claimId = rejectedRefundFrom(order, before);
+        voidAnswers(PaymentCancelVoidQueryResult.Outcome.NO_REFUND_CONFIRMED, "CLAIM_REJECTED_BY_PG");
+        MvcTestResult detail = detail(claimId);
+        assertThat(detail).bodyJson().extractingPath("$.dataBody.recovery.cancellationRejectable").isEqualTo(true);
+        verify(paymentCancelPort, never()).confirmNoRefund(anyLong(), anyLong(), anyLong(), any());
+
+        MvcTestResult rejected = rejectCancellation(claimId, version(order.id()), MemberRole.OWNER);
+
+        assertThat(rejected).hasStatus(200);
+        assertThat(rejected).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("REJECTED");
+        assertThat(rejected).bodyJson().extractingPath("$.dataBody.recovery.situation.code").isEqualTo("NO_ACTION");
+        assertThat(rejected).bodyJson().extractingPath("$.dataBody.recovery.cancellationRejectable").isEqualTo(false);
+        assertThat(rejected).bodyJson().extractingPath("$.dataBody.recovery.refundConfirmable").isEqualTo(false);
+        assertThat(rejected).bodyJson().extractingPath("$.dataBody.recovery.lastDecision.reason").isEqualTo(REJECTION_REASON);
+        assertThat(rejected.getResponse().getContentAsByteArray()).asString(java.nio.charset.StandardCharsets.UTF_8)
+            .doesNotContain("PAYMENT_019").doesNotContain("decidedBy").doesNotContain("CLAIM_REJECTED_BY_PG");
+        assertThat(orderStatus(order.id())).isEqualTo(before.name());
+        assertThat(jdbc.queryForMap("select to_status, changed_by_type, changed_by_id, reason from orders.order_status_history "
+            + "where order_id = ? and from_status = 'CANCEL_REQUESTED'", order.id()))
+            .containsEntry("to_status", before.name()).containsEntry("changed_by_type", "ADMIN").containsEntry("reason", REJECTION_REASON)
+            .hasEntrySatisfying("changed_by_id", id -> assertThat(((Number) id).longValue()).isEqualTo(1L));
+        assertThat(claim(order.id())).containsEntry("status", "REJECTED").containsEntry("failure_code", null).containsEntry("decision_reason", REJECTION_REASON)
+            .containsEntry("decision_failure_code", "PAYMENT_019");
+        verify(paymentCancelPort, times(1)).confirmNoRefund(paymentIdOf(order.id()), order.id(), claimId, order.quote().totalAmount());
+        verify(paymentCancelPort, times(1)).cancel(anyLong(), anyLong(), any());
+        verify(stockRestorationPort, never()).restoreCancellation(anyLong(), anyLong(), any());
+    }
+
+    @ParameterizedTest(name = "{0} → {1}")
+    @CsvSource({"REFUNDED, 409, ORDER_052", "UNCONFIRMED, 409, ORDER_053", "UNAVAILABLE, 503, ORDER_054"})
+    @DisplayName("취소 거절 — 결제사가 환불 없음을 확정하지 않으면(이미 환불 052 · 확인 못 함 053 · 확인 불가 054) 클레임 · 주문 · 이력이 그대로다")
+    void unconfirmedNoRefundChangesNothing(PaymentCancelVoidQueryResult.Outcome outcome, int status, String code) {
+        Order order = paidOrder();
+        long claimId = rejectedRefundClaim(order);
+        voidAnswers(outcome, "PG_ANSWER");
+        Map<String, Object> claimBefore = claim(order.id());
+        long orderVersionBefore = orderVersion(order.id());
+        long historyBefore = historyCount(order.id());
+
+        MvcTestResult result = rejectCancellation(claimId, version(order.id()), MemberRole.OWNER);
+
+        assertThat(result).hasStatus(status);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo(code);
+        assertThat(claim(order.id())).isEqualTo(claimBefore);
+        assertThat(orderStatus(order.id())).isEqualTo("CANCEL_REQUESTED");
+        assertThat(orderVersion(order.id())).isEqualTo(orderVersionBefore);
+        assertThat(historyCount(order.id())).isEqualTo(historyBefore);
+        verify(paymentCancelPort, times(1)).confirmNoRefund(anyLong(), anyLong(), anyLong(), any());
+        verify(stockRestorationPort, never()).restoreCancellation(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("취소 거절 — 결과 미확인 환불 실패(REFUND_UNCONFIRMED)는 후보가 아니다: cancellationRejectable=false, 409 ORDER_041 이고 무환불 판정을 부르지 않는다")
+    void unconfirmedRefundIsNotRejectableAndNeverCallsVoid() {
+        Order order = paidOrder();
+        // 결제사 결과를 끝내 확인하지 못한 취소 — 주문은 취소 요청에 머물고 클레임은 재시도 상한 뒤 REFUND_UNCONFIRMED 로 닫힌 것과 같게 둔다
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.unknown());
+        customerCancel(order.id());
+        jdbc.update("update orders.claim set status = 'REFUND_FAILED', failure_code = 'REFUND_UNCONFIRMED', next_attempt_at = null, "
+            + "version = version + 1 where order_id = ? and type = 'CANCELLATION'", order.id());
+        assertThat(orderStatus(order.id())).isEqualTo("CANCEL_REQUESTED");
+        long claimId = claimId(order.id());
+        long before = version(order.id());
+
+        assertThat(detail(claimId)).bodyJson().extractingPath("$.dataBody.recovery.cancellationRejectable").isEqualTo(false);
+        MvcTestResult result = rejectCancellation(claimId, before, MemberRole.OWNER);
+
+        assertThat(result).hasStatus(409);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_041");
+        assertThat(version(order.id())).isEqualTo(before);
+        verify(paymentCancelPort, never()).confirmNoRefund(anyLong(), anyLong(), anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("취소 거절 — 주문 저장이 낙관락에서 지면 409 ORDER_037 이고 같은 트랜잭션의 클레임 거절도 롤백된다 — 클레임 · 주문 · 이력이 그대로다")
+    void cancellationRejectionOrderConflictRollsBackClaim() {
+        Order order = paidOrder();
+        long claimId = rejectedRefundClaim(order);
+        voidAnswers(PaymentCancelVoidQueryResult.Outcome.NO_REFUND_CONFIRMED, "CLAIM_REJECTED_BY_PG");
+        Map<String, Object> claimBefore = claim(order.id());
+        long orderVersionBefore = orderVersion(order.id());
+        long historyBefore = historyCount(order.id());
+        // 클레임 저장 직후 · 주문 저장 직전에 같은 트랜잭션 연결로 주문 버전을 올린다 — 주문 저장의 버전 비교가 실제로 진다(확정 시험과 같은 방식)
+        doAnswer(invocation -> {
+            Object saved = invocation.callRealMethod();
+            jdbc.update("update orders.orders set version = version + 1 where id = ?", order.id());
+            return saved;
+        }).when(org.springframework.test.util.AopTestUtils.<ClaimRepositoryPort>getUltimateTargetObject(claimRepository)).update(any());
+
+        MvcTestResult result = rejectCancellation(claimId, version(order.id()), MemberRole.OWNER);
+
+        assertThat(result).hasStatus(409);
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_037");
+        assertThat(claim(order.id())).isEqualTo(claimBefore).containsEntry("status", "REFUND_FAILED").containsEntry("decision_reason", null);
+        assertThat(orderStatus(order.id())).isEqualTo("CANCEL_REQUESTED");
+        assertThat(orderVersion(order.id())).as("같은 트랜잭션에서 올린 버전도 롤백된다").isEqualTo(orderVersionBefore);
+        assertThat(historyCount(order.id())).isEqualTo(historyBefore);
+    }
+
+    @Test
+    @DisplayName("취소 거절 — 같은 화면으로 다시 보내면 409 ORDER_037 이고 무환불 판정을 다시 부르지 않는다. 거절된 접수는 다시 시도 038 · 환불 확정 041 이다")
+    void rejectedCancellationIsFinal() {
+        Order order = paidOrder();
+        long claimId = rejectedRefundClaim(order);
+        voidAnswers(PaymentCancelVoidQueryResult.Outcome.NO_REFUND_CONFIRMED, "CLAIM_REJECTED_BY_PG");
+        long seen = version(order.id());
+        assertThat(rejectCancellation(claimId, seen, MemberRole.ADMIN)).hasStatus(200);
+
+        MvcTestResult replay = rejectCancellation(claimId, seen, MemberRole.ADMIN);
+        assertThat(replay).hasStatus(409);
+        assertThat(replay).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_037");
+        verify(paymentCancelPort, times(1)).confirmNoRefund(anyLong(), anyLong(), anyLong(), any());
+
+        long now = version(order.id());
+        MvcTestResult retry = mvc.post().uri("/api/v1/admin/claims/{claimId}/retries", claimId).header(HttpHeaders.AUTHORIZATION, bearer(1, MemberRole.ADMIN))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":" + now + "}").exchange();
+        assertThat(retry).hasStatus(409);
+        assertThat(retry).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_038");
+        MvcTestResult confirm = decide("refund-confirmation", claimId, now, MemberRole.OWNER);
+        assertThat(confirm).hasStatus(409);
+        assertThat(confirm).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_041");
+        MvcTestResult again = rejectCancellation(claimId, now, MemberRole.OWNER);
+        assertThat(again).hasStatus(409);
+        assertThat(again).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_041");
+        assertThat(claim(order.id())).containsEntry("status", "REJECTED");
+        assertThat(orderStatus(order.id())).isEqualTo("PAID");
+        verify(paymentCancelPort, times(1)).confirmNoRefund(anyLong(), anyLong(), anyLong(), any());
+        verify(stockRestorationPort, never()).restoreCancellation(anyLong(), anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("취소 거절 — 반품 거절 · 다시 시도는 되는 MANAGER 도 실제 보안 체인에서 403 이고 무환불 판정 · 클레임 · 주문이 그대로다")
+    void managerMayNotRejectCancellation() {
+        Order order = paidOrder();
+        long claimId = rejectedRefundClaim(order);
+        long before = version(order.id());
+
+        assertThat(rejectCancellation(claimId, before, MemberRole.MANAGER)).hasStatus(403);
+        assertThat(rejectCancellation(claimId, before, MemberRole.STAFF)).hasStatus(403);
+
+        assertThat(version(order.id())).isEqualTo(before);
+        assertThat(orderStatus(order.id())).isEqualTo("CANCEL_REQUESTED");
+        verify(paymentCancelPort, never()).confirmNoRefund(anyLong(), anyLong(), anyLong(), any());
     }
 }

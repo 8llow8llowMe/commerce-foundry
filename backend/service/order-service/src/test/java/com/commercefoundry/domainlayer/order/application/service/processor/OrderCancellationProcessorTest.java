@@ -360,6 +360,55 @@ class OrderCancellationProcessorTest {
         assertRejected(() -> processor(false, false).request(MEMBER, shipping.id(), OrderCancelReason.OTHER), OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID);
     }
 
+    /** 결제사가 거절한 취소를 운영자가 무환불 확인 뒤 거절한 클레임(#17 A4). */
+    private static Claim rejectedCancellation() {
+        return stored(requestedClaim().failRefund("PAYMENT_019"), 1L).rejectCancellation(new Claim.Decision("결제사 화면에서 환불 없음 확인", 9L, NOW,
+            "PAYMENT_019"));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"PAID", "PREPARING", "MAKING"})
+    @DisplayName("거절된 취소가 있는 주문의 재취소는 409 ORDER_055 다(#17 A4) — 게이트(503 ORDER_035) · 결제 대조보다 먼저이고 아무것도 쓰지 않는다")
+    void rejectedCancellationBlocksCustomerRecancel(OrderStatus status) {
+        Order order = order(status);
+        givenLocked(order);
+        when(claims.findByOrderIdAndRequestKey(order.id(), Claim.cancellationRequestKey(order.id()))).thenReturn(Optional.of(rejectedCancellation()));
+
+        assertRejected(() -> processor(true, false).request(MEMBER, order.id(), OrderCancelReason.OTHER), OrderErrorCode.CANCELLATION_ALREADY_REJECTED);
+        assertRejected(() -> processor(true, true).request(MEMBER, order.id(), OrderCancelReason.OTHER), OrderErrorCode.CANCELLATION_ALREADY_REJECTED);
+
+        verifyNoInteractions(payments);
+        verify(orders, never()).saveStatusChange(any(), any());
+        verify(claims, never()).insert(any());
+    }
+
+    @Test
+    @DisplayName("거절된 취소가 있어도 상태 판정이 먼저다 — 배송 중 · 제작 중(설정 꺼짐)은 ORDER_020 이다")
+    void statusRejectionComesBeforeRejectedCancellation() {
+        Order making = order(OrderStatus.MAKING);
+        givenLocked(making);
+        when(claims.findByOrderIdAndRequestKey(making.id(), Claim.cancellationRequestKey(making.id()))).thenReturn(Optional.of(rejectedCancellation()));
+        assertRejected(() -> processor(false).request(MEMBER, making.id(), OrderCancelReason.OTHER), OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID);
+
+        Order shipping = new Order(making.id(), MEMBER, OrderStatus.SHIPPING, making.quote(), making.itemIds(), making.shippingAddress(),
+            making.stockReservationId(), making.paymentDueAt(), null, null, Instant.EPOCH, 2L);
+        givenLocked(shipping);
+        assertRejected(() -> processor(true).request(MEMBER, shipping.id(), OrderCancelReason.OTHER), OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID);
+        verify(claims, never()).insert(any());
+    }
+
+    @Test
+    @DisplayName("거절된 취소에 환불 성공이 오면(봉인 뒤라 오면 안 된다) 기록하지 않는다 — 전이 예외이고 클레임 · 주문을 저장하지 않는다(CANCELLATION_REFUND_AFTER_REJECTION 로그)")
+    void refundSuccessAfterRejectionIsNotRecorded() {
+        Claim rejected = rejectedCancellation();
+        when(orders.findById(rejected.orderId())).thenReturn(Optional.of(order(OrderStatus.PAID)));
+
+        assertThatThrownBy(() -> processor(false).recordRefund(rejected, CancellationStepOutcome.done())).isInstanceOf(IllegalStateException.class);
+
+        verify(claims, never()).update(any());
+        verify(orders, never()).saveStatusChange(any(), any());
+    }
+
     @ParameterizedTest
     @EnumSource(value = OrderStatus.class, names = {"PAID", "PREPARING", "SHIPPING", "PENDING_PAYMENT"})
     @DisplayName("환불은 확정됐는데 주문이 취소 요청 · 취소 완료가 아니면(데이터 이상) 복원하지 않고 RESTORATION_FAILED(ORDER_STATUS_UNEXPECTED), 주문은 두다")
