@@ -66,14 +66,23 @@ public enum ProductDraftErrorCode {
     GENERATION_IMAGE_NOT_FOUND("PRODUCT_DRAFT_045", "초안에 해당 순번의 이미지가 없습니다.", HttpStatus.NOT_FOUND),
 
     /*
-     * 05x — 어드민 생성 시작({@code POST /{draftId}/generate}, #359 PR-B1). 만료 · 동시 변경 · 없음은 {@link #DRAFT_EXPIRED} · {@link #DRAFT_BUSY} · {@link #NOT_FOUND_DRAFT} 를 쓴다.
+     * 05x — 어드민 생성 시작({@code POST /{draftId}/generate}, #359 PR-B1) · 재생성({@code POST /{draftId}/regenerate}, B3). 만료 · 동시 변경 · 없음은 {@link #DRAFT_EXPIRED} · {@link #DRAFT_BUSY} · {@link #NOT_FOUND_DRAFT} 를 쓴다.
      */
     /** 생성 기능이 닫혀 있다({@code product-draft.generation-enabled=false}). 중단 스위치라 다시 시도하지 않는다 — 04x 의 {@link #GENERATION_DISABLED} 와 같은 사유의 어드민 코드다. */
     GENERATION_START_DISABLED("PRODUCT_DRAFT_050", "AI 상품 초안 생성은 아직 사용할 수 없습니다.", HttpStatus.BAD_REQUEST),
-    /** 생성 대기가 아니다(검토 대기 · 생성 실패 · 적용 · 거절). 재생성은 후속 단계에서 연다. */
+    /** 생성 대기가 아니다(검토 대기 · 생성 실패 · 적용 · 거절). 검토 대기 · 실패한 초안은 재생성({@code POST /{draftId}/regenerate})을 쓴다. */
     GENERATION_NOT_STARTABLE("PRODUCT_DRAFT_051", "현재 초안 상태에서는 생성을 시작할 수 없습니다.", HttpStatus.CONFLICT),
     /** 이미지 원본을 고정하지 않은 초안(#359 PR-2a 이전)이다. 같은 초안으로는 생성할 수 없다. */
     GENERATION_SOURCE_MISSING("PRODUCT_DRAFT_052", "이 초안은 생성할 수 없습니다. 새 초안을 만들어 주세요.", HttpStatus.CONFLICT),
+    /**
+     * 매장 전체에서 진행 중인 생성이 상한(3건, #359 D13)에 찼다. 회차를 시작한 지 {@code product-draft.generation-slot-ttl} 안의 생성 대기 · 생성 중 초안만 센다.
+     * 초안은 그대로다 — 잠시 뒤 같은 요청을 다시 보낸다.
+     */
+    GENERATION_SLOTS_FULL("PRODUCT_DRAFT_053", "다른 상품 초안 생성이 진행 중입니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.CONFLICT),
+    /** 재생성 횟수(첫 생성 포함 3회차, #359 D9)를 다 썼다. 실패한 회차도 센다. */
+    REGENERATION_EXHAUSTED("PRODUCT_DRAFT_054", "다시 생성할 수 있는 횟수를 모두 썼습니다. 제안을 직접 고치거나 새 초안을 만들어 주세요.", HttpStatus.CONFLICT),
+    /** 같은 입력으로는 다시 생성해도 안 되는 실패다(이미지 변경 · 입력 · 결과 보관 만료 · 입력 거절). */
+    REGENERATION_NEW_DRAFT_REQUIRED("PRODUCT_DRAFT_055", "이 초안으로는 다시 생성할 수 없습니다. 새 초안을 만들어 주세요.", HttpStatus.CONFLICT),
 
     /** 이미지 저장소를 확인하지 못했다(꺼짐 · 장애). 초안 생성 · internal 이미지 읽기 공통이고, 잠시 뒤 같은 요청을 다시 보내면 된다. */
     IMAGE_STORAGE_UNAVAILABLE("PRODUCT_DRAFT_501", "이미지 저장소를 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),

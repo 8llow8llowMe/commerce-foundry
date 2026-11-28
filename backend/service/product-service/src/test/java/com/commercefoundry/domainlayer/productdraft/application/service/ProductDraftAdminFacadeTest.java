@@ -38,6 +38,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.transaction.annotation.Transactional;
@@ -285,6 +286,101 @@ class ProductDraftAdminFacadeTest {
         @DisplayName("생성 시작은 원격 등록이 섞여 Facade 에 트랜잭션을 걸지 않는다")
         void generateHasNoFacadeTransaction() throws NoSuchMethodException {
             assertThat(ProductDraftAdminFacade.class.getMethod("generate", long.class, long.class).isAnnotationPresent(Transactional.class)).isFalse();
+        }
+
+        @Test
+        @DisplayName("게이트 잠금 대기 초과는 025 이고 등록하지 않는다")
+        void gateLockTimeout() {
+            given(generationProcessor.claim(9L, 200L)).willThrow(new CannotAcquireLockException("gate"));
+
+            assertCode(() -> enabled.generate(9L, 200L), ProductDraftErrorCode.DRAFT_BUSY);
+            verify(generationProcessor, never()).register(any());
+            verify(audit).productDraftGenerated(200L, 9L, false);
+        }
+    }
+
+    @Nested
+    @DisplayName("재생성 (#359 B3)")
+    class Regenerate {
+
+        private final ProductDraftAdminFacade enabled = facade(true);
+
+        private ProductDraft secondClaimed() {
+            return new ProductDraft(9L, ProductDraftStatus.REQUESTED, 100L, FACTS, List.of(), null, null, NOW.plusSeconds(60), NOW,
+                new ProductDraftGeneration(2, 300L, NOW, HASH, null));
+        }
+
+        private ProductDraft secondGenerating() {
+            return new ProductDraft(9L, ProductDraftStatus.GENERATING, 100L, FACTS, List.of(), null, null, NOW.plusSeconds(60), NOW,
+                new ProductDraftGeneration(2, 300L, NOW, HASH, 32L));
+        }
+
+        @Test
+        @DisplayName("다음 회차 claim → 등록 → 작업 연결 순이고 생성 중 2회차를 돌려준다. 성공을 재생성 감사로 남긴다")
+        void startsInOrder() {
+            given(processor.now()).willReturn(NOW);
+            given(generationProcessor.claimRegeneration(9L, 300L, 1)).willReturn(secondClaimed());
+            given(generationProcessor.register(secondClaimed())).willReturn(32L);
+            given(generationProcessor.bind(secondClaimed(), 32L)).willReturn(secondGenerating());
+
+            var response = enabled.regenerate(9L, 300L, 1);
+
+            assertThat(response.status().code()).isEqualTo("GENERATING");
+            assertThat(response.generationNo()).isEqualTo(2);
+            assertThat(response.regenerationAvailable()).isFalse();
+            InOrder order = inOrder(generationProcessor);
+            order.verify(generationProcessor).claimRegeneration(9L, 300L, 1);
+            order.verify(generationProcessor).register(secondClaimed());
+            order.verify(generationProcessor).bind(secondClaimed(), 32L);
+            verify(generationProcessor, never()).claim(anyLong(), anyLong());
+            verify(audit).productDraftRegenerated(300L, 9L, true);
+        }
+
+        @Test
+        @DisplayName("이미 다음 회차가 생성 중이면(같은 요청의 재시도) 등록하지 않고 그대로 200 이다")
+        void retry() {
+            given(processor.now()).willReturn(NOW);
+            given(generationProcessor.claimRegeneration(9L, 300L, 1)).willReturn(secondGenerating());
+
+            assertThat(enabled.regenerate(9L, 300L, 1).generationNo()).isEqualTo(2);
+            verify(generationProcessor, never()).register(any());
+            verify(audit).productDraftRegenerated(300L, 9L, true);
+        }
+
+        @Test
+        @DisplayName("플래그가 닫혀 있으면 050 이고, 상위 트랜잭션 안이면 502 다 — 둘 다 claim 하지 않고 실패를 감사에 남긴다")
+        void refusedBeforeClaim() {
+            assertCode(() -> facade.regenerate(9L, 300L, 1), ProductDraftErrorCode.GENERATION_START_DISABLED);
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+            try {
+                assertCode(() -> enabled.regenerate(9L, 300L, 1), ProductDraftErrorCode.GENERATION_UNAVAILABLE);
+            } finally {
+                TransactionSynchronizationManager.clear();
+            }
+            verifyNoInteractions(generationProcessor);
+            verify(audit, times(2)).productDraftRegenerated(300L, 9L, false);
+        }
+
+        @Test
+        @DisplayName("claim 의 업무 거절(053 · 054 · 055)과 낙관적 락 충돌(025)은 등록하지 않고 실패를 감사에 남긴다")
+        void claimRefusals() {
+            for (ProductDraftErrorCode code : List.of(ProductDraftErrorCode.GENERATION_SLOTS_FULL, ProductDraftErrorCode.REGENERATION_EXHAUSTED,
+                ProductDraftErrorCode.REGENERATION_NEW_DRAFT_REQUIRED)) {
+                doThrow(new ProductDraftException(code)).when(generationProcessor).claimRegeneration(9L, 300L, 1);
+                assertCode(() -> enabled.regenerate(9L, 300L, 1), code);
+            }
+            doThrow(new ObjectOptimisticLockingFailureException("ProductDraftEntity", 9L)).when(generationProcessor).claimRegeneration(9L, 300L, 1);
+            assertCode(() -> enabled.regenerate(9L, 300L, 1), ProductDraftErrorCode.DRAFT_BUSY);
+
+            verify(generationProcessor, never()).register(any());
+            verify(audit, times(4)).productDraftRegenerated(300L, 9L, false);
+        }
+
+        @Test
+        @DisplayName("재생성은 원격 등록이 섞여 Facade 에 트랜잭션을 걸지 않는다")
+        void noFacadeTransaction() throws NoSuchMethodException {
+            assertThat(ProductDraftAdminFacade.class.getMethod("regenerate", long.class, long.class, int.class).isAnnotationPresent(Transactional.class))
+                .isFalse();
         }
     }
 

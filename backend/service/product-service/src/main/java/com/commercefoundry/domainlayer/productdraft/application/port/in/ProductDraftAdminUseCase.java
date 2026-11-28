@@ -22,6 +22,13 @@ public interface ProductDraftAdminUseCase {
      */
     ProductDraftAdminResponse generate(long draftId, long memberId);
 
+    /**
+     * 재생성(#359 B3) — 검토 대기 · 다시 생성할 수 있는 실패 초안의 다음 회차를 시작한다. {@code generationNo} 는 운영자가 보던 회차이며, 이미 다음 회차를 시작했으면
+     * 그대로 돌려준다(작업이 없으면 같은 값으로 다시 등록). 생성 시작의 오류에 더해 회차 불일치 {@code 025} · 자리 없음 {@code 053} · 횟수 소진 {@code 054} ·
+     * 새 초안 필요 {@code 055}(409)다. 새 회차를 여는 생성 시작도 자리 없음 {@code 053} 이 날 수 있다.
+     */
+    ProductDraftAdminResponse regenerate(long draftId, long memberId, int generationNo);
+
     /** 생성 작업의 확정 결과를 현재 회차에 반영한다. */
     ProductDraftAdminResponse refresh(long draftId, long memberId);
 

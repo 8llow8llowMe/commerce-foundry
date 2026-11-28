@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.productdraft.adapter.in.admin.controller
 import com.commercefoundry.common.config.SwaggerSecurityConfigurer;
 import com.commercefoundry.common.dto.Response;
 import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.request.ProductDraftCreateRequest;
+import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.request.ProductDraftRegenerateRequest;
 import com.commercefoundry.domainlayer.productdraft.adapter.in.admin.dto.response.ProductDraftAdminResponse;
 import com.commercefoundry.domainlayer.productdraft.application.exception.ProductDraftValidationMessage;
 import com.commercefoundry.domainlayer.productdraft.application.port.in.ProductDraftAdminUseCase;
@@ -88,7 +89,7 @@ public class ProductDraftAdminController {
         summary = "생성 시작",
         description = "생성 대기 초안의 AI 생성을 시작하거나 다시 시도하고 초안을 돌려준다(200). 이미 생성 중이면 그대로 200 이다. "
             + "생성을 쓸 수 없으면 400(PRODUCT_DRAFT_050), 보관 기간이 지났으면 409(PRODUCT_DRAFT_022), 다른 변경과 겹치면 409(PRODUCT_DRAFT_025), "
-            + "생성 대기가 아니면 409(PRODUCT_DRAFT_051), 생성할 수 없는 옛 초안은 409(PRODUCT_DRAFT_052)다. "
+            + "생성 대기가 아니면 409(PRODUCT_DRAFT_051), 생성할 수 없는 옛 초안은 409(PRODUCT_DRAFT_052), 매장 전체에서 진행 중인 생성이 3건이면 409(PRODUCT_DRAFT_053)다. "
             + "옛 초안의 이미지 원본 합계가 20MiB 를 넘으면 400(PRODUCT_DRAFT_037)이며 더 작은 이미지로 새 초안을 만든다. "
             + "생성을 시작하지 못했으면 503(PRODUCT_DRAFT_502), 시작 결과를 확인하지 못했으면 502(PRODUCT_DRAFT_504)이고 잠시 뒤 다시 시도한다. 없는 초안은 404(PRODUCT_DRAFT_001)다."
     )
@@ -100,6 +101,27 @@ public class ProductDraftAdminController {
         @Parameter(description = "초안 아이디") @PathVariable @Positive(message = ProductDraftValidationMessage.DRAFT_ID_POSITIVE) long draftId
     ) {
         return ResponseEntity.ok().body(Response.success(productDraftAdminUseCase.generate(draftId, member.memberId())));
+    }
+
+    @Operation(
+        summary = "다시 생성",
+        description = "검토 대기(READY)나 생성 실패(FAILED) 초안의 다음 회차 AI 생성을 시작하고 초안을 돌려준다(200). 첫 생성을 포함해 3회차까지이며 실패한 회차도 센다. "
+            + "본문 generationNo 는 화면에 보이는 지금 회차다 — 이미 다음 회차를 시작했으면 그대로 200 이라 같은 요청을 다시 보내도 한 번만 생성한다. "
+            + "회차가 화면과 다르거나 다른 변경과 겹치면 409(PRODUCT_DRAFT_025), 검토 대기 · 실패가 아니면 409(PRODUCT_DRAFT_051), "
+            + "매장 전체에서 진행 중인 생성이 3건이면 409(PRODUCT_DRAFT_053), 횟수를 다 썼으면 409(PRODUCT_DRAFT_054), "
+            + "같은 입력으로는 다시 만들 수 없는 실패면 409(PRODUCT_DRAFT_055)이고 새 초안을 만든다. 생성을 쓸 수 없으면 400(PRODUCT_DRAFT_050), "
+            + "보관 기간이 지났으면 409(PRODUCT_DRAFT_022), 생성을 시작하지 못했으면 503(PRODUCT_DRAFT_502), 시작 결과를 확인하지 못했으면 502(PRODUCT_DRAFT_504)다. "
+            + "이전 회차의 제안은 남지 않는다. 없는 초안은 404(PRODUCT_DRAFT_001)다."
+    )
+    @PreAuthorize(AdminAuthority.CATALOG_MANAGE)
+    @AdminAudited(action = "PRODUCT_DRAFT_REGENERATE")
+    @PostMapping("/{draftId}/regenerate")
+    public ResponseEntity<Response<ProductDraftAdminResponse>> regenerate(
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "초안 아이디") @PathVariable @Positive(message = ProductDraftValidationMessage.DRAFT_ID_POSITIVE) long draftId,
+        @RequestBody @Valid ProductDraftRegenerateRequest request
+    ) {
+        return ResponseEntity.ok().body(Response.success(productDraftAdminUseCase.regenerate(draftId, member.memberId(), request.generationNo())));
     }
 
     @Operation(summary = "생성 결과 반영", description = "생성 중인 초안의 작업 결과를 확인해 현재 회차에 반영한다. 초안은 상품에 적용되지 않는다.")

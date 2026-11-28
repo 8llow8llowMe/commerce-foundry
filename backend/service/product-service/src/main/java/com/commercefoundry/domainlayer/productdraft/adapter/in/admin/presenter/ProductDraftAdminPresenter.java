@@ -35,7 +35,9 @@ public class ProductDraftAdminPresenter {
             .expiresAt(draft.expiresAt())
             .rejectedAt(draft.rejectedAt())
             .result(status == ProductDraftStatus.READY && draft.candidate() != null ? toResult(draft.candidate()) : null)
-            .failureNotice(status == ProductDraftStatus.FAILED ? failureNotice(draft.failureCode()) : null)
+            .failureNotice(status == ProductDraftStatus.FAILED ? failureNotice(draft, now) : null)
+            .generationNo(draft.generation().generationNo())
+            .regenerationAvailable(draft.regenerationAvailableAt(now))
             .build();
     }
 
@@ -68,13 +70,17 @@ public class ProductDraftAdminPresenter {
         };
     }
 
-    private String failureNotice(String code) {
-        return switch (code == null ? "" : code) {
-            case "PRODUCT_DRAFT_IMAGE_CHANGED", "PRODUCT_DRAFT_INPUT_EXPIRED", ProductDraft.GENERATION_RESULT_EXPIRED ->
-                "초안의 입력이나 결과를 더 이상 사용할 수 없습니다. 새 초안을 만들어 주세요.";
+    /** 실패 안내 — 새 초안이 필요한 실패는 새 초안을, 그 밖에는 남은 회차가 있으면 다시 생성을 안내한다. 내부 실패 코드는 싣지 않는다. */
+    private String failureNotice(ProductDraft draft, Instant now) {
+        if (draft.requiresNewDraft()) {
+            return "초안의 입력이나 결과를 더 이상 사용할 수 없습니다. 새 초안을 만들어 주세요.";
+        }
+        String next = draft.regenerationAvailableAt(now) ? "다시 생성하거나 직접 입력해 주세요." : "새 초안을 만들거나 직접 입력해 주세요.";
+        String code = draft.failureCode() == null ? "" : draft.failureCode();
+        return switch (code) {
             case "PRODUCT_DRAFT_AI_BUDGET_EXCEEDED" -> "AI 사용 한도를 초과했습니다. 한도를 확인하거나 직접 입력해 주세요.";
-            case ProductDraft.GENERATION_CANCELLED -> "AI 초안 생성이 취소되었습니다. 새 초안을 만들거나 직접 입력해 주세요.";
-            default -> "AI 초안을 만들지 못했습니다. 새 초안을 만들거나 직접 입력해 주세요.";
+            case ProductDraft.GENERATION_CANCELLED -> "AI 초안 생성이 취소되었습니다. " + next;
+            default -> "AI 초안을 만들지 못했습니다. " + next;
         };
     }
 

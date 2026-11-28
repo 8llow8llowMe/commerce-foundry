@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.productdraft.application.port.out;
 
 import com.commercefoundry.domainlayer.productdraft.domain.model.ProductDraft;
+import java.time.Instant;
 import java.util.Optional;
 
 public interface ProductDraftRepositoryPort {
@@ -24,4 +25,15 @@ public interface ProductDraftRepositoryPort {
 
     /** 같은 트랜잭션에서 읽은 버전으로 상태와 결과 칸만 바꾸고 flush 한다. */
     void updateGenerationResult(ProductDraft draft);
+
+    /**
+     * 매장 전체 생성 게이트 행을 쓰기 잠근다(#359 B3, D13) — 트랜잭션이 끝날 때까지 다른 새 회차 시작이 기다린다. 잠금 대기가 길면 잠금 예외
+     * ({@code PessimisticLockingFailureException})다. 게이트 행이 없으면(운영 DDL 의 insert 누락) {@code false} 다.
+     */
+    boolean lockGenerationGate();
+
+    /**
+     * 생성 자리를 차지한 초안 수 — 회차를 시작한 생성 대기 · 생성 중 초안 중 보관 기간 안이고 회차 시작이 {@code since} 뒤인 것. {@link #lockGenerationGate} 뒤에 부른다.
+     */
+    long countGenerationSlots(Instant now, Instant since);
 }

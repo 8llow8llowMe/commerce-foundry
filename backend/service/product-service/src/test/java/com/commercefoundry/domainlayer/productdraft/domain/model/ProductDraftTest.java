@@ -150,4 +150,69 @@ class ProductDraftTest {
             assertThatThrownBy(() -> new ProductDraftGeneration(-1, null, null, null, null)).isInstanceOf(IllegalArgumentException.class);
         }
     }
+
+    @Nested
+    @DisplayName("재생성 (#359 B3)")
+    class Regeneration {
+
+        private static final String HASH = "a".repeat(64);
+
+        private ProductDraft finished(ProductDraftStatus status, int generationNo, String failureCode, Instant expiresAt) {
+            return new ProductDraft(1L, status, 100L, EMPTY_FACTS, List.of(), null, null, expiresAt, NOW.minusSeconds(60),
+                new ProductDraftGeneration(generationNo, 200L, NOW.minusSeconds(30), HASH, 9L), null, failureCode);
+        }
+
+        @Test
+        @DisplayName("검토 대기 g=1 → 생성 대기 g=2 · 작업 없음 · 새 어드민 · 시각, 이전 결과 · 실패 사유는 지운다")
+        void claimNextGeneration() {
+            ProductDraft failed = finished(ProductDraftStatus.FAILED, 1, "PRODUCT_DRAFT_AI_FAILED", NOW.plusSeconds(60));
+
+            ProductDraft claimed = failed.claimGeneration(300L, HASH, NOW);
+
+            assertThat(claimed.status()).isEqualTo(ProductDraftStatus.REQUESTED);
+            assertThat(claimed.generation()).isEqualTo(new ProductDraftGeneration(2, 300L, NOW, HASH, null));
+            assertThat(claimed.failureCode()).isNull();
+            assertThat(claimed.candidate()).isNull();
+            assertThat(claimed.awaitingGenerationJob()).isTrue();
+            assertThat(claimed.bindJob(1L, 2, HASH, 10L).status()).isEqualTo(ProductDraftStatus.GENERATING);
+        }
+
+        @Test
+        @DisplayName("다시 생성할 수 있음 — 기간 안의 검토 대기 · 다시 만들 수 있는 실패이고 회차가 3 보다 작을 때만")
+        void availability() {
+            assertThat(finished(ProductDraftStatus.READY, 1, null, NOW.plusSeconds(60)).regenerationAvailableAt(NOW)).isTrue();
+            assertThat(finished(ProductDraftStatus.READY, 2, null, NOW.plusSeconds(60)).regenerationAvailableAt(NOW)).isTrue();
+            assertThat(finished(ProductDraftStatus.FAILED, 2, ProductDraft.GENERATION_CANCELLED, NOW.plusSeconds(60)).regenerationAvailableAt(NOW)).isTrue();
+
+            assertThat(finished(ProductDraftStatus.READY, 3, null, NOW.plusSeconds(60)).regenerationAvailableAt(NOW)).isFalse();
+            assertThat(finished(ProductDraftStatus.FAILED, 3, "PRODUCT_DRAFT_AI_FAILED", NOW.plusSeconds(60)).regenerationAvailableAt(NOW)).isFalse();
+            assertThat(finished(ProductDraftStatus.READY, 1, null, NOW).regenerationAvailableAt(NOW)).isFalse();
+            assertThat(finished(ProductDraftStatus.GENERATING, 1, null, NOW.plusSeconds(60)).regenerationAvailableAt(NOW)).isFalse();
+            assertThat(draft(ProductDraftStatus.REQUESTED, NOW.plusSeconds(60)).regenerationAvailableAt(NOW)).isFalse();
+            assertThat(draft(ProductDraftStatus.READY, NOW.plusSeconds(60)).regenerationAvailableAt(NOW)).isFalse();
+        }
+
+        @ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {"PRODUCT_DRAFT_IMAGE_CHANGED", "PRODUCT_DRAFT_INPUT_EXPIRED", "GENERATION_RESULT_EXPIRED",
+            "PRODUCT_DRAFT_INPUT_REJECTED", "PRODUCT_DRAFT_INPUT_MISMATCH", "PRODUCT_DRAFT_INPUT_INVALID", "PRODUCT_DRAFT_IMAGES_TOO_LARGE"})
+        @DisplayName("새 초안이 필요한 실패는 다시 생성할 수 없고 claim 도 막는다")
+        void newDraftRequired(String failureCode) {
+            ProductDraft failed = finished(ProductDraftStatus.FAILED, 1, failureCode, NOW.plusSeconds(60));
+
+            assertThat(failed.requiresNewDraft()).isTrue();
+            assertThat(failed.regenerationAvailableAt(NOW)).isFalse();
+            assertThatThrownBy(() -> failed.claimGeneration(300L, HASH, NOW)).isInstanceOf(IllegalStateException.class);
+        }
+
+        @Test
+        @DisplayName("3회차를 다 쓴 초안 · 만료 초안 · 생성 중 초안은 claim 을 막는다")
+        void claimRefused() {
+            assertThatThrownBy(() -> finished(ProductDraftStatus.READY, 3, null, NOW.plusSeconds(60)).claimGeneration(300L, HASH, NOW))
+                .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> finished(ProductDraftStatus.READY, 1, null, NOW).claimGeneration(300L, HASH, NOW))
+                .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> finished(ProductDraftStatus.GENERATING, 1, null, NOW.plusSeconds(60)).claimGeneration(300L, HASH, NOW))
+                .isInstanceOf(IllegalStateException.class);
+        }
+    }
 }
