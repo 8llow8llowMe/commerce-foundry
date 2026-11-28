@@ -7,18 +7,22 @@ import {
   type ImageFollowUp,
 } from './draft-image';
 import { CHECK_FIELDS, chartFieldKey, withSummary } from './errors';
+import { TEXT_SOURCE_CHANGED } from './text-source';
 import { rowKey, valueText, type ChartForm } from './form';
 import type { CodeName, TemplateColumn } from './types';
 
 /**
  * AI 사이즈표 초안(BE #217, product-service `SizeChartDraftAdminController`). 정본은 `backend/docs/ai-size-chart-guide.md`.
- * - 생성 `POST /products/{id}/size-chart/drafts` — UUID `Idempotency-Key` 필수, `{templateId, mode:'TEXT', sourceText}` 또는
- *   IMAGE `{templateId, mode:'IMAGE', images, personalInfoRemovedConfirmed:true}`(`./draft-image`) → 202 `{draftId, jobId}`
+ * - 생성 `POST /products/{id}/size-chart/drafts` — UUID `Idempotency-Key` 필수, `{templateId, mode:'TEXT', sourceText, textSelection?}` 또는
+ *   IMAGE `{templateId, mode:'IMAGE', images, personalInfoRemovedConfirmed:true}`(`./draft-image`) → 202 `{draftId, jobId}`.
+ *   `textSelection` 은 상품 본문 후보를 그대로 고른 경우만 싣는다(`./text-source`, 다르면 409 017)
  * - 상세 `GET /size-chart-drafts/{id}` — 저장된 상태만 읽는다(작업 결과를 가져오지 않는다)
  * - 목록 `GET /size-chart-drafts?productId=&requestedByMe=&page=&size=` — 최신순, 만료 초안 제외
  * - 새로고침 `POST /{id}/refresh` — 끝난 작업 결과를 검증해 초안에 반영(감사 기록이 남아 반복 호출하지 않는다)
  * - 적용 `POST /{id}/apply` — `{expectedDraftVersion, correctedChart, acknowledgedWarningIds}` → 상품 표 전체 교체
- * IMAGE 는 BE 플래그가 열린 환경에서만 받는다(닫혀 있으면 011). 일괄 이관(batches)은 BE 후속 범위라 화면에 없다.
+ * IMAGE 는 BE 플래그가 열린 환경에서만 받는다(닫혀 있으면 011).
+ * 여러 상품의 TEXT 초안을 한 번에 요청하는 일괄 제출(`POST /size-chart-drafts/batches`)은 `./draft-batch` · `/size-charts/batch` 화면이다.
+ * IMAGE 일괄은 BE 가 받지만 화면은 상품별 편집기에서만 요청한다(이미지 확인 · 개인정보 확인이 상품마다 필요하다).
  */
 export const SOURCE_TEXT_MAX = 12000;
 
@@ -218,6 +222,11 @@ export type DraftCreateFailure =
   /** 결과 모름 · 일시 장애 — 같은 키로 다시 보내면 된다 */
   | { kind: 'retry'; message: string }
   /**
+   * 고른 본문 후보가 그사이 바뀌었다(017) — 후보를 다시 읽어 다시 고르게 한다. 키는 그대로 둔다:
+   * 다시 고른 텍스트가 같으면 같은 키(아무것도 만들어지지 않았다), 다르면 지문이 바뀌어 저절로 새 키다.
+   */
+  | { kind: 'textSource'; message: string }
+  /**
    * IMAGE 입력 후속 처리 — 기능 닫힘(011) · 후보 다시 읽기(012) · 선택 비우기(112 · 113) · 다시 확인(015 · 114).
    * 다시 확인하면 확인값이 바뀌어 지문도 바뀌므로 키는 저절로 새로 만든다.
    */
@@ -233,6 +242,10 @@ export function draftCreateFailure(
   if (!(cause instanceof ApiError)) return { kind: 'retry', message: DRAFT_REQUEST_FAILED };
   if (cause.code === CODE('030'))
     return { kind: 'source', message: mode === 'IMAGE' ? DRAFT_IMAGE_UNSAFE : DRAFT_SOURCE_UNSAFE };
+  if (cause.code === CODE('017')) return { kind: 'textSource', message: TEXT_SOURCE_CHANGED };
+  // 선택 정보 모양 오류(119)는 화면이 만들지 않는 본문이다 — 같은 안내로 후보를 다시 읽게 한다
+  if (cause.fieldErrors.some((item) => item.code === CODE('119')))
+    return { kind: 'textSource', message: TEXT_SOURCE_CHANGED };
   const image = imageCreateFailure(cause);
   if (image) {
     if (image.kind === 'image') return { kind: 'source', message: image.message };
