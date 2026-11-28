@@ -22,7 +22,8 @@ class OrderStatusTransitionTest {
         Map.entry(OrderStatus.SHIPPING, EnumSet.of(OrderStatus.DELIVERED)),
         Map.entry(OrderStatus.DELIVERED, EnumSet.of(OrderStatus.PURCHASE_CONFIRMED, OrderStatus.RETURN_REQUESTED)),
         Map.entry(OrderStatus.PURCHASE_CONFIRMED, EnumSet.noneOf(OrderStatus.class)),
-        Map.entry(OrderStatus.CANCEL_REQUESTED, EnumSet.of(OrderStatus.CANCELED, OrderStatus.PAID)),
+        // 취소 정리(CANCELED · PAID, #684)와 취소 거절 복귀(PAID · MAKING · PREPARING, #17 A4)
+        Map.entry(OrderStatus.CANCEL_REQUESTED, EnumSet.of(OrderStatus.CANCELED, OrderStatus.PAID, OrderStatus.MAKING, OrderStatus.PREPARING)),
         Map.entry(OrderStatus.CANCELED, EnumSet.noneOf(OrderStatus.class)),
         Map.entry(OrderStatus.RETURN_REQUESTED, EnumSet.of(OrderStatus.RETURNED, OrderStatus.DELIVERED)),
         Map.entry(OrderStatus.RETURNED, EnumSet.noneOf(OrderStatus.class)));

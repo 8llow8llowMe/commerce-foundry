@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.order.adapter.out.client.StockRestoration
 import com.commercefoundry.domainlayer.order.adapter.out.client.feign.PaymentCancelClient;
 import com.commercefoundry.domainlayer.order.adapter.out.client.feign.StockRestorationClient;
 import com.commercefoundry.domainlayer.order.adapter.out.client.support.PaymentCancelInternalResponseSupport;
+import com.commercefoundry.domainlayer.order.adapter.out.client.support.PaymentCancelVoidInternalResponseSupport;
 import com.commercefoundry.domainlayer.order.adapter.out.client.support.StockReservationInternalResponseSupport;
 import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCode;
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
@@ -376,7 +377,7 @@ class CancellationRefundRecoveryPostgresTest {
         }
         @Bean @Primary PaymentCancelPort httpPayment() {
             return new PaymentCancelClientAdapter(client(PaymentCancelClient.class), new PaymentCancelInternalResponseSupport(
-                CircuitBreakerRegistry.ofDefaults(), JSON));
+                CircuitBreakerRegistry.ofDefaults(), JSON), new PaymentCancelVoidInternalResponseSupport(CircuitBreakerRegistry.ofDefaults(), JSON));
         }
         @Bean @Primary StockRestorationPort httpRestoration() {
             return new StockRestorationClientAdapter(client(StockRestorationClient.class), new StockReservationInternalResponseSupport(

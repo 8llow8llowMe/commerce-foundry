@@ -1,22 +1,30 @@
 package com.commercefoundry.domainlayer.order.adapter.out.client;
 
+import static com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelVoidQueryResult.Outcome.NO_REFUND_CONFIRMED;
+import static com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelVoidQueryResult.Outcome.REFUNDED;
+import static com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelVoidQueryResult.Outcome.UNAVAILABLE;
+import static com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelVoidQueryResult.Outcome.UNCONFIRMED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelQueryResult;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelQueryResult.Outcome;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelVoidQueryResult;
 import com.commercefoundry.security.internal.InternalTokenDecoderFactory;
 import com.commercefoundry.security.support.TestServiceTokens;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.sun.net.httpserver.HttpServer;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
@@ -62,8 +70,10 @@ class PaymentCancelClientAdapterTest {
     private static final List<List<String>> AUTHORIZATIONS = new CopyOnWriteArrayList<>();
     private static final long PAYMENT_ID = 4611686018427387906L;
     private static final long CLAIM_ID = 4611686018427387999L;
+    private static final long ORDER_ID = 4611686018427387905L;
     private static final Money AMOUNT = Money.of(28_000, CurrencyCode.KRW);
     private static final String CIRCUIT = "payment-cancellation";
+    private static final String VOID_CIRCUIT = "payment-cancellation-void";
 
     @Autowired
     private PaymentCancelPort paymentCancelPort;
@@ -123,6 +133,7 @@ class PaymentCancelClientAdapterTest {
         RESPONSE_BODY.set(success());
         DELAY_MS.set(0);
         circuitBreakerRegistry.circuitBreaker(CIRCUIT).reset();
+        circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).reset();
         circuitBreakerRegistry.circuitBreaker("payment-service").reset();
     }
 
@@ -303,6 +314,230 @@ class PaymentCancelClientAdapterTest {
         assertThatThrownBy(() -> paymentCancelPort.cancel(0, CLAIM_ID, AMOUNT)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> paymentCancelPort.cancel(PAYMENT_ID, 0, AMOUNT)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> paymentCancelPort.cancel(PAYMENT_ID, CLAIM_ID, Money.zero(CurrencyCode.KRW))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(REQUESTS).isEmpty();
+    }
+
+    // ---- 무환불 판정(void, #17 A4 · payment-guide.md §8-1) ----
+
+    private static String voidBody(String outcome, String reason, String sealed) {
+        return """
+            {"dataHeader":{"success":true,"resultCode":null,"resultMessage":null,"fieldErrors":null},
+             "dataBody":{"paymentId":"4611686018427387906","claimId":"4611686018427387999","outcome":"%s","reason":"%s",
+             "paymentStatus":{"code":"DONE","name":"결제 완료","description":"결제가 승인되었습니다."},
+             "retainedAmount":{"amount":28000,"currency":"KRW"},"sealed":%s,"futureField":1}}
+            """.formatted(outcome, reason, sealed);
+    }
+
+    private PaymentCancelVoidQueryResult confirmNoRefund() {
+        return paymentCancelPort.confirmNoRefund(PAYMENT_ID, ORDER_ID, CLAIM_ID, AMOUNT);
+    }
+
+    @Test
+    @DisplayName("void — POST .../cancellations/{claimId}/void 에 서비스 토큰 · {orderId, amount, currency} 를 싣고 멱등 키 헤더는 싣지 않는다. 봉인된 확정은 NO_REFUND_CONFIRMED 다")
+    void voidRequestContract() {
+        RESPONSE_BODY.set(voidBody("NO_REFUND_CONFIRMED", "CLAIM_NEVER_REQUESTED", "true"));
+
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(NO_REFUND_CONFIRMED, "CLAIM_NEVER_REQUESTED"));
+
+        assertThat(REQUESTS).containsExactly("POST /internal/v1/payments/" + PAYMENT_ID + "/cancellations/" + CLAIM_ID + "/void");
+        assertThat(KEYS).as("멱등 키 헤더가 없다 — 경로의 claimId 가 키다").containsExactly(List.of());
+        JsonNode body = JsonMapper.builder().build().readTree(BODIES.getFirst());
+        assertThat(body.path("orderId").asLong()).isEqualTo(ORDER_ID);
+        assertThat(body.path("amount").asLong()).isEqualTo(28_000);
+        assertThat(body.path("currency").asString()).isEqualTo("KRW");
+        assertThat(body.has("claimId")).as("claimId 는 경로에만 싣는다").isFalse();
+        assertThat(AUTHORIZATIONS).singleElement().satisfies(values -> {
+            Jwt token = InternalTokenDecoderFactory.create(TestServiceTokens.properties("payment-service"), Clock.systemUTC())
+                .decode(values.getFirst().substring("Bearer ".length()));
+            assertThat(token.getAudience()).containsExactly("payment-service");
+        });
+    }
+
+    @ParameterizedTest(name = "{0} · {1} · sealed={2} → {3} ({4})")
+    @CsvSource({
+        "NO_REFUND_CONFIRMED, PG_REJECTED, true, NO_REFUND_CONFIRMED, PG_REJECTED",
+        "REFUNDED, CLAIM_REFUND_SUCCEEDED, false, REFUNDED, CLAIM_REFUND_SUCCEEDED",
+        "REFUNDED, CLAIM_REFUNDED_EXTERNALLY, false, REFUNDED, CLAIM_REFUNDED_EXTERNALLY",
+        "UNCONFIRMED, CLAIM_REFUND_PENDING, false, UNCONFIRMED, CLAIM_REFUND_PENDING",
+        "UNCONFIRMED, PG_LEDGER_MISMATCH, true, UNCONFIRMED, PG_LEDGER_MISMATCH",
+        "UNCONFIRMED, RETAINED_SHORT, false, UNCONFIRMED, RETAINED_SHORT",
+        "UNCONFIRMED, PG_UNAVAILABLE, false, UNAVAILABLE, PG_UNAVAILABLE",
+        "UNCONFIRMED, PG_UNAVAILABLE, true, UNAVAILABLE, PG_UNAVAILABLE"
+    })
+    @DisplayName("void 판정은 outcome 그대로 옮기되, PG 잔액 조회 장애(PG_UNAVAILABLE)만 UNAVAILABLE 이다 — 한 번만 보낸다")
+    void voidOutcomes(String outcome, String reason, String sealed, PaymentCancelVoidQueryResult.Outcome expected, String expectedReason) {
+        RESPONSE_BODY.set(voidBody(outcome, reason, sealed));
+
+        PaymentCancelVoidQueryResult result = confirmNoRefund();
+
+        assertThat(result).isEqualTo(new PaymentCancelVoidQueryResult(expected, expectedReason));
+        assertThat(result.isNoRefundConfirmed()).isEqualTo(expected == NO_REFUND_CONFIRMED);
+        assertThat(REQUESTS).hasSize(1);
+    }
+
+    @ParameterizedTest(name = "{0} {1} → UNCONFIRMED")
+    @CsvSource({"404, PAYMENT_001", "409, PAYMENT_019", "409, PAYMENT_017", "409, PAYMENT_012", "400, PAYMENT_101", "400, PAYMENT_123"})
+    @DisplayName("void 의 PAYMENT_* 4xx 는 UNCONFIRMED(확인하지 못함)이고 사유는 그 코드다 — 서킷 실패로 세지 않는다")
+    void voidPaymentClientErrorsAreUnconfirmed(int status, String code) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(failure(code));
+
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(UNCONFIRMED, code));
+        assertThat(REQUESTS).hasSize(1);
+        assertThat(circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).getMetrics().getNumberOfFailedCalls()).isZero();
+    }
+
+    static Stream<org.junit.jupiter.params.provider.Arguments> voidUnclassifiedClientErrors() {
+        return Stream.of(
+            org.junit.jupiter.params.provider.Arguments.of(401, failure("SECURITY_007")),
+            org.junit.jupiter.params.provider.Arguments.of(403, failure("SECURITY_006")),
+            org.junit.jupiter.params.provider.Arguments.of(404, ""),
+            org.junit.jupiter.params.provider.Arguments.of(404, failure("GATEWAY_001")),
+            org.junit.jupiter.params.provider.Arguments.of(408, failure("X")),
+            org.junit.jupiter.params.provider.Arguments.of(409, failure("attacker\\r\\nFORGED")),
+            org.junit.jupiter.params.provider.Arguments.of(429, ""));
+    }
+
+    @ParameterizedTest(name = "{0} {1} → UNAVAILABLE")
+    @MethodSource("voidUnclassifiedClientErrors")
+    @DisplayName("void 의 PAYMENT_ 코드 없는 4xx(401 · 403 · 봉투 없는 404 · 다른 도메인 코드 · 408 · 429)는 판정을 받지 못한 UNAVAILABLE 이다")
+    void voidUnclassifiedClientErrorsAreUnavailable(int status, String body) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(body);
+
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(UNAVAILABLE, "CLIENT_ERROR"));
+        assertThat(REQUESTS).hasSize(1);
+    }
+
+    @ParameterizedTest(name = "{0} {1} → UNAVAILABLE")
+    @CsvSource({"500, X", "502, X", "503, PAYMENT_018"})
+    @DisplayName("void 의 5xx 는 UNAVAILABLE 이고 void 서킷 실패로 센다 — 환불 실행 서킷과 나뉜다")
+    void voidServerErrorsAreUnavailable(int status, String code) {
+        RESPONSE_STATUS.set(status);
+        RESPONSE_BODY.set(failure(code));
+
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(UNAVAILABLE, "SERVER_ERROR"));
+        assertThat(circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).getMetrics().getNumberOfFailedCalls()).isEqualTo(1);
+        assertThat(circuitBreakerRegistry.circuitBreaker(CIRCUIT).getMetrics().getNumberOfFailedCalls()).as("환불 실행 서킷과 나뉜다").isZero();
+    }
+
+    @Test
+    @DisplayName("void 의 read timeout 은 UNAVAILABLE 이다 — 같은 클라이언트(paymentCancelClient) 타임아웃을 쓴다")
+    void voidTimeoutIsUnavailable() {
+        DELAY_MS.set(1_200);
+
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(UNAVAILABLE, "TRANSPORT_FAILURE"));
+        assertThat(REQUESTS).hasSize(1);
+        assertThat(circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).getMetrics().getNumberOfFailedCalls()).isEqualTo(1);
+        assertThat(circuitBreakerRegistry.circuitBreaker(CIRCUIT).getMetrics().getNumberOfFailedCalls()).isZero();
+    }
+
+    @Test
+    @DisplayName("void 서킷이 열려 있으면 부르지 않고 UNAVAILABLE 이다 — 환불 실행 서킷이 열려 있어도 void 는 부른다")
+    void voidCircuitOpenSkipsTransport() {
+        circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).transitionToOpenState();
+
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(UNAVAILABLE, "CIRCUIT_OPEN"));
+        assertThat(REQUESTS).isEmpty();
+
+        circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).reset();
+        circuitBreakerRegistry.circuitBreaker(CIRCUIT).transitionToOpenState();
+        RESPONSE_BODY.set(voidBody("NO_REFUND_CONFIRMED", "PG_REJECTED", "true"));
+        assertThat(confirmNoRefund().isNoRefundConfirmed()).isTrue();
+        assertThat(REQUESTS).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("void 서킷은 연속 3회 실패에 60초 열리고(반열림 시험 1회) 4xx 는 세지 않는다 — yml 바인딩 결과를 본다")
+    void voidCircuitOpensAfterThreeConsecutiveFailures() {
+        CircuitBreakerConfig config = circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).getCircuitBreakerConfig();
+        assertThat(environment.getProperty("resilience4j.circuitbreaker.instances." + VOID_CIRCUIT + ".base-config")).isEqualTo("default");
+        assertThat(config.getSlidingWindowSize()).isEqualTo(3);
+        assertThat(config.getMinimumNumberOfCalls()).isEqualTo(3);
+        assertThat(config.getFailureRateThreshold()).isEqualTo(100f);
+        assertThat(config.getPermittedNumberOfCallsInHalfOpenState()).isEqualTo(1);
+        assertThat(config.getWaitIntervalFunctionInOpenState().apply(1)).isEqualTo(Duration.ofSeconds(60).toMillis());
+
+        RESPONSE_STATUS.set(409);
+        RESPONSE_BODY.set(failure("PAYMENT_019"));
+        for (int call = 0; call < 3; call++) {
+            confirmNoRefund();
+        }
+        assertThat(circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).getState()).as("4xx 는 세지 않는다").isEqualTo(CircuitBreaker.State.CLOSED);
+
+        RESPONSE_STATUS.set(503);
+        RESPONSE_BODY.set(failure("X"));
+        confirmNoRefund();
+        confirmNoRefund();
+        assertThat(circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).getState()).as("2회로는 열리지 않는다").isEqualTo(CircuitBreaker.State.CLOSED);
+        confirmNoRefund();
+        assertThat(circuitBreakerRegistry.circuitBreaker(VOID_CIRCUIT).getState()).isEqualTo(CircuitBreaker.State.OPEN);
+        int sent = REQUESTS.size();
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(UNAVAILABLE, "CIRCUIT_OPEN"));
+        assertThat(REQUESTS).hasSize(sent);
+        assertThat(circuitBreakerRegistry.circuitBreaker(CIRCUIT).getState()).as("환불 실행 서킷은 그대로").isEqualTo(CircuitBreaker.State.CLOSED);
+    }
+
+    @ParameterizedTest
+    @MethodSource("voidContractViolations")
+    @DisplayName("void 200 인데 계약과 다르면(다른 결제 · 다른 클레임 · 모르는 outcome · 봉인 아닌 확정 · 실패 봉투 · 본문 없음) 확정하지 않고 UNAVAILABLE 이다")
+    void voidContractViolationIsUnavailable(String body) {
+        RESPONSE_BODY.set(body);
+
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(UNAVAILABLE, "CONTRACT_VIOLATION"));
+    }
+
+    static Stream<String> voidContractViolations() {
+        String valid = voidBody("NO_REFUND_CONFIRMED", "CLAIM_NEVER_REQUESTED", "true");
+        return Stream.of(
+            valid.replace("\"paymentId\":\"4611686018427387906\"", "\"paymentId\":\"4611686018427387907\""),
+            valid.replace("\"claimId\":\"4611686018427387999\"", "\"claimId\":\"4611686018427387998\""),
+            valid.replace("\"claimId\":\"4611686018427387999\",", ""),
+            valid.replace("\"outcome\":\"NO_REFUND_CONFIRMED\"", "\"outcome\":\"no_refund_confirmed\""),
+            valid.replace("\"outcome\":\"NO_REFUND_CONFIRMED\"", "\"outcome\":\"NO_REFUND_CONFIRMED \""),
+            valid.replace("\"outcome\":\"NO_REFUND_CONFIRMED\"", "\"outcome\":\"VOIDED\""),
+            valid.replace("\"outcome\":\"NO_REFUND_CONFIRMED\",", ""),
+            valid.replace("\"sealed\":true", "\"sealed\":false"),
+            valid.replace("\"sealed\":true", "\"sealed\":null"),
+            valid.replace("\"sealed\":true,", ""),
+            valid.replace("\"success\":true", "\"success\":false"),
+            "{\"dataHeader\":{\"success\":true},\"dataBody\":null}",
+            "null");
+    }
+
+    @Test
+    @DisplayName("void 200 의 본문이 JSON 이 아니면 확정하지 않는다(UNAVAILABLE)")
+    void voidUndecodableBodyIsUnavailable() {
+        RESPONSE_BODY.set("not-json");
+
+        assertThat(confirmNoRefund().outcome()).isEqualTo(UNAVAILABLE);
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("void 판정 이유는 코드 모양일 때만 싣고 로그에 남긴다 — 위조 줄바꿈 · 원격 메시지는 남지 않고, 빈 이유는 UNSPECIFIED 다")
+    void voidReasonIsSanitized(CapturedOutput output) {
+        RESPONSE_BODY.set(voidBody("REFUNDED", "attacker\\r\\nFORGED_LINE", "false"));
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(REFUNDED, "UNRECOGNIZED"));
+
+        RESPONSE_BODY.set(voidBody("UNCONFIRMED", "", "false"));
+        assertThat(confirmNoRefund()).isEqualTo(new PaymentCancelVoidQueryResult(UNCONFIRMED, "UNSPECIFIED"));
+
+        RESPONSE_STATUS.set(409);
+        RESPONSE_BODY.set(failure("PAYMENT_019"));
+        confirmNoRefund();
+        assertThat(output.getAll()).contains("reason=UNRECOGNIZED", "resultCode=PAYMENT_019").doesNotContain("FORGED_LINE", "RAW_REMOTE_MESSAGE");
+    }
+
+    @Test
+    @DisplayName("void 는 양수가 아닌 결제 · 주문 · 클레임 아이디 · 0원이면 부르지 않는다")
+    void voidRejectsInvalidArguments() {
+        assertThatThrownBy(() -> paymentCancelPort.confirmNoRefund(0, ORDER_ID, CLAIM_ID, AMOUNT)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> paymentCancelPort.confirmNoRefund(PAYMENT_ID, 0, CLAIM_ID, AMOUNT)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> paymentCancelPort.confirmNoRefund(PAYMENT_ID, ORDER_ID, 0, AMOUNT)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> paymentCancelPort.confirmNoRefund(PAYMENT_ID, ORDER_ID, CLAIM_ID, Money.zero(CurrencyCode.KRW)))
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> paymentCancelPort.confirmNoRefund(PAYMENT_ID, ORDER_ID, CLAIM_ID, null)).isInstanceOf(NullPointerException.class);
         assertThat(REQUESTS).isEmpty();
     }
 }

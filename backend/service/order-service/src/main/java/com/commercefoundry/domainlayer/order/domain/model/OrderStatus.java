@@ -22,7 +22,8 @@ import lombok.RequiredArgsConstructor;
  *   <tr><td>PREPARING</td><td>SHIPPING · CANCEL_REQUESTED</td></tr>
  *   <tr><td>SHIPPING</td><td>DELIVERED</td></tr>
  *   <tr><td>DELIVERED</td><td>PURCHASE_CONFIRMED · RETURN_REQUESTED</td></tr>
- *   <tr><td>CANCEL_REQUESTED</td><td>CANCELED · PAID — 취소 정리({@link Order#settleCancellation}): 전량 환불이면 취소 완료, 열린 취소 없이 일부만이면 결제 완료로 (#684)</td></tr>
+ *   <tr><td>CANCEL_REQUESTED</td><td>CANCELED · PAID — 취소 정리({@link Order#settleCancellation}): 전량 환불이면 취소 완료, 열린 취소 없이 일부만이면 결제 완료로 (#684).
+ *     PAID · MAKING · PREPARING — 취소 거절({@link Order#rejectCancellation}): 무환불을 확인한 취소를 거절하면 취소 요청 전 상태로 (#17 A4)</td></tr>
  *   <tr><td>RETURN_REQUESTED</td><td>RETURNED · DELIVERED — 반품 정리({@link Order#settleReturn}): 전량 환불이면 반품 완료, 열린 반품 없이 일부만이면 배송 완료로 (#17 B1)</td></tr>
  * </table>
  */
@@ -94,7 +95,7 @@ public enum OrderStatus implements CodeNameDescribable {
         table.put(PREPARING, Collections.unmodifiableSet(EnumSet.of(SHIPPING, CANCEL_REQUESTED)));
         table.put(SHIPPING, Collections.unmodifiableSet(EnumSet.of(DELIVERED)));
         table.put(DELIVERED, Collections.unmodifiableSet(EnumSet.of(PURCHASE_CONFIRMED, RETURN_REQUESTED)));
-        table.put(CANCEL_REQUESTED, Collections.unmodifiableSet(EnumSet.of(CANCELED, PAID)));
+        table.put(CANCEL_REQUESTED, Collections.unmodifiableSet(EnumSet.of(CANCELED, PAID, MAKING, PREPARING)));
         table.put(RETURN_REQUESTED, Collections.unmodifiableSet(EnumSet.of(RETURNED, DELIVERED)));
         return Collections.unmodifiableMap(table);
     }
