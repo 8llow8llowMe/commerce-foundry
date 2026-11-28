@@ -7,37 +7,68 @@ import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static com.commercefoundry.shared.commerce.CurrencyCode.USD;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import static org.assertj.core.api.Assertions.tuple;
 
+import com.commercefoundry.common.dto.item.MoneyItem;
+import com.commercefoundry.domainlayer.category.adapter.out.persistence.CategoryRepositoryAdapter;
+import com.commercefoundry.domainlayer.category.application.mapper.CategoryMapperImpl;
+import com.commercefoundry.domainlayer.category.application.service.processor.CategoryProcessor;
+import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductSkuItem;
+import com.commercefoundry.domainlayer.product.adapter.in.web.presenter.ProductWebPresenter;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.PriceSourceSnapshotRepositoryAdapter;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.ProductCustomOrderFieldRepositoryAdapter;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.ProductImageRepositoryAdapter;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.ProductOptionRepositoryAdapter;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.ProductRepositoryAdapter;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.SkuRepositoryAdapter;
+import com.commercefoundry.domainlayer.product.adapter.out.persistence.StockRepositoryAdapter;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductEntity;
 import com.commercefoundry.domainlayer.product.application.mapper.CurrencyPriceMapperImpl;
+import com.commercefoundry.domainlayer.product.application.mapper.ProductCustomOrderFieldMapperImpl;
+import com.commercefoundry.domainlayer.product.application.mapper.ProductImageMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.ProductMapperImpl;
+import com.commercefoundry.domainlayer.product.application.mapper.ProductOptionMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.SkuMapperImpl;
+import com.commercefoundry.domainlayer.product.application.mapper.StockMapperImpl;
+import com.commercefoundry.domainlayer.product.application.port.in.ProductWebUseCase;
 import com.commercefoundry.domainlayer.product.application.port.out.PriceSourceSnapshotRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.service.ProductWebFacade;
 import com.commercefoundry.domainlayer.product.application.service.processor.PriceSourceSnapshotResolver;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductDetailProcessor;
+import com.commercefoundry.domainlayer.product.application.service.processor.ProductListProcessor;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.global.config.ProductServiceFeaturesConfig;
+import com.commercefoundry.global.properties.PriceSourceProperties;
+import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.persistence.config.QuerydslConfigurer;
+import com.commercefoundry.persistence.config.SnowflakeConfigurer;
+import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
 import com.commercefoundry.shared.commerce.Money;
 import jakarta.persistence.EntityManager;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.Supplier;
 import java.util.stream.LongStream;
 import javax.sql.DataSource;
 import org.hibernate.resource.jdbc.spi.StatementInspector;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.util.AopTestUtils;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
@@ -49,18 +80,28 @@ import org.springframework.transaction.support.TransactionTemplate;
     "spring.datasource.url=jdbc:h2:mem:price-source-snapshot;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;INIT=CREATE SCHEMA IF NOT EXISTS product"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ProductServiceFeaturesConfig.class, QuerydslConfigurer.class, PriceSourceSnapshotRepositoryAdapter.class,
-    ProductMapperImpl.class, SkuMapperImpl.class, CurrencyPriceMapperImpl.class})
+    ProductMapperImpl.class, SkuMapperImpl.class, CurrencyPriceMapperImpl.class,
+    // 고객 상품 상세 Facade 를 실제 트랜잭션 프록시로 부르는 데 필요한 빈 — 이 클래스 전용 컨텍스트(AFTER_CLASS)라 다른 시험과 공유하지 않는다
+    ProductWebFacade.class, CategoryProcessor.class, ProductListProcessor.class, ProductDetailProcessor.class, ProductWebPresenter.class,
+    ProductRepositoryAdapter.class, ProductOptionRepositoryAdapter.class, SkuRepositoryAdapter.class, StockRepositoryAdapter.class,
+    ProductImageRepositoryAdapter.class, ProductCustomOrderFieldRepositoryAdapter.class, CategoryRepositoryAdapter.class,
+    ProductOptionMapperImpl.class, StockMapperImpl.class, ProductImageMapperImpl.class, ProductCustomOrderFieldMapperImpl.class, CategoryMapperImpl.class,
+    SnowflakePropertiesConfig.class, SnowflakeConfigurer.class})
+@EnableConfigurationProperties({StoreProperties.class, PriceSourceProperties.class})
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class PriceSourceSnapshotIntegrationTest {
     @Autowired PriceSourceSnapshotRepositoryPort port;
+    @Autowired ProductWebUseCase productWebUseCase;
+    @Autowired ProductDetailProcessor productDetailProcessor;
     @Autowired DataSource dataSource;
     @Autowired PlatformTransactionManager manager;
     @Autowired EntityManager em;
     JdbcTemplate jdbc;
     static final String MARKER = "snapshot-fixture-marker";
-    static final List<String> TABLES = List.of("sku_price", "product_price", "sku", "product_option_value", "product");
+    static final long CATEGORY_ID = 999;
+    static final List<String> TABLES = List.of("sku_price", "product_price", "sku", "product_option_value", "product", "category");
 
     public static class SqlProbe implements StatementInspector {
         static final ThreadLocal<List<String>> SQL = new ThreadLocal<>();
@@ -192,6 +233,73 @@ class PriceSourceSnapshotIntegrationTest {
             }
         });
         assertThat(activeDuringSnapshot[0]).as("호출자 커넥션 하나만 빌린다").isEqualTo(1);
+    }
+
+    /**
+     * B4 생산 경로 — 실제 {@link ProductWebUseCase} 프록시가 연 TX 안에서 PRICE_BOOK 상세가 참여 snapshot 을 읽어 투영 가격으로 응답한다.
+     * 예외 없이 끝나는 것 자체가 {@code getProduct} 의 TX 속성(read-only · REPEATABLE_READ)이 어댑터 사전조건을 만족한다는 증명이다 —
+     * 누가 격리 수준을 지우거나 다른 TX 안에서 부르게 바꾸면 {@code CALLER_TRANSACTION_REQUIRED} 로 여기서 깨진다.
+     */
+    @Test
+    void priceBookDetailThroughTheFacadeProxyRespondsWithProjectedPrices() {
+        seedVisibleProduct(1);
+        sku(10, 1, "KRW", false);
+        sku(11, 1, "KRW", false);
+        jdbc.update("update product.sku set additional_price_amount=500 where id=10");
+        productPrice(100, 1, "KRW", 1_000);
+        skuPrice(200, 10, "KRW", 500);
+        skuPrice(201, 11, "KRW", 0);
+
+        var response = inPriceBookMode(() -> productWebUseCase.getProduct(1L));
+
+        assertThat(response.productId()).isEqualTo("1");
+        assertThat(response.categoryPath()).hasSize(1);
+        assertThat(response.salePrice()).isEqualTo(new MoneyItem(1_000, "KRW"));
+        assertThat(response.skus()).extracting(ProductSkuItem::skuId, ProductSkuItem::additionalPrice, ProductSkuItem::salePrice)
+            .containsExactlyInAnyOrder(
+                tuple("10", new MoneyItem(500, "KRW"), new MoneyItem(1_500, "KRW")),
+                tuple("11", new MoneyItem(0, "KRW"), new MoneyItem(1_000, "KRW")));
+    }
+
+    /** 같은 경로에서 기준통화 가격행이 없으면 고정 메시지 · cause 없는 내부 오류다 — 메시지에 ID · 금액이 없다(#20 D7). */
+    @Test
+    void priceBookDetailThroughTheFacadeProxyFailsSanitizedWhenThePriceRowIsMissing() {
+        seedVisibleProduct(2);
+        sku(20, 2, "KRW", false);
+
+        Throwable failure = catchThrowable(() -> inPriceBookMode(() -> productWebUseCase.getProduct(2L)));
+
+        assertThat(failure).isExactlyInstanceOf(IllegalStateException.class).hasNoCause();
+        assertThat(failure.getMessage()).isNotBlank().doesNotContainPattern("\\d");
+    }
+
+    /**
+     * 싱글턴 상세 Processor 의 가격 원천 모드를 PRICE_BOOK 으로 잠깐 바꿔 부른다. 컨텍스트 프로퍼티 · 빈 정의를 바꾸지 않으려고 필드만 교체하고,
+     * 성공 · 실패와 무관하게 원래 값으로 되돌린다 — 다른 시험에 새지 않게 한다.
+     */
+    <T> T inPriceBookMode(Supplier<T> call) {
+        Object target = AopTestUtils.getUltimateTargetObject(productDetailProcessor);
+        assertThat(AopUtils.isAopProxy(target)).isFalse();
+        Object original = ReflectionTestUtils.getField(target, "priceSourceProperties");
+        ReflectionTestUtils.setField(target, "priceSourceProperties", new PriceSourceProperties(PriceSourceProperties.Mode.PRICE_BOOK));
+        LocaleContextHolder.setLocale(Locale.KOREAN);
+        try {
+            return call.get();
+        } finally {
+            LocaleContextHolder.resetLocaleContext();
+            ReflectionTestUtils.setField(target, "priceSourceProperties", original);
+            assertThat(ReflectionTestUtils.getField(target, "priceSourceProperties")).isSameAs(original);
+        }
+    }
+
+    /** 고객에게 보이는 판매 중 상품(KRW 1,000)과 그 대표 카테고리. 가격행은 시험마다 넣는다. */
+    void seedVisibleProduct(long id) {
+        if (jdbc.queryForObject("select count(*) from product.category where id=?", Long.class, CATEGORY_ID) == 0) {
+            jdbc.update("insert into product.category (id,parent_id,name,display_order,visible,created_at,updated_at)"
+                + " values (?,null,'detail-category',0,true,current_timestamp,current_timestamp)", CATEGORY_ID);
+        }
+        product(id, "KRW", false);
+        jdbc.update("update product.product set visible=true, sale_status='ON_SALE', sale_price_amount=1000 where id=?", id);
     }
 
     /** {@code ProductWebFacade#getProduct} 와 같은 read-only REPEATABLE_READ 호출자 TX. */

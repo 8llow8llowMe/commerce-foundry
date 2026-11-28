@@ -35,7 +35,6 @@ import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SkuStocks;
 import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.global.properties.StoreProperties;
-import com.commercefoundry.shared.commerce.Money;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -143,7 +142,7 @@ public class ProductDetailProcessor {
 
     /**
      * PRICE_BOOK 모드 — 호출자(Facade) TX에 참여해 같은 시점의 가격 원천을 읽고, 투영의 기준통화 판매가 · 정가와 SKU 추가금을 응답 계산에 쓴다.
-     * 상품의 비가격 필드와 SKU 의 상태 · 옵션 · 배송 필드는 이미 읽은 값을 그대로 둔다. 가격행 누락 · drift · snapshot 실패와,
+     * 상품의 비가격 필드는 이미 읽은 값을 그대로 두고, SKU 는 같은 TX 시점에 읽은 투영 SKU(추가금만 가격행 값)를 쓴다. 가격행 누락 · drift · snapshot 실패와,
      * 상세가 읽은 SKU 가 투영에 없는 경우는 모두 고정 내부 오류다 — 원인 · 원문 · ID · 금액 없이 전역 처리기의 500 {@code COMMON_000} 으로 끝난다(#20 D7).
      */
     private PricedSource priceBookSource(Product product, List<Sku> visibleSkus) {
@@ -156,15 +155,16 @@ public class ProductDetailProcessor {
         } catch (PriceSourceSnapshotResolver.ResolutionException exception) {
             throw priceSourceFailure(exception.reason().name());
         }
-        Map<Long, Money> additionalBySkuId = new HashMap<>();
-        projection.skus().forEach(sku -> additionalBySkuId.put(sku.id(), sku.additionalPrice()));
+        // 투영 SKU 는 같은 시점에 읽은 SKU 에 가격행 추가금만 넣은 것이다. 상세가 고른 SKU(은퇴 제외) 순서대로 꺼내 쓴다.
+        Map<Long, Sku> projectedById = new HashMap<>();
+        projection.skus().forEach(sku -> projectedById.put(sku.id(), sku));
         List<Sku> pricedSkus = new ArrayList<>(visibleSkus.size());
         for (Sku sku : visibleSkus) {
-            Money additional = additionalBySkuId.get(sku.id());
-            if (additional == null) {
+            Sku projected = projectedById.get(sku.id());
+            if (projected == null) {
                 throw priceSourceFailure(PRICE_SOURCE_SKU_MISMATCH);
             }
-            pricedSkus.add(sku.withEditableProperties(additional, sku.saleStatus(), sku.weightGrams(), sku.hsCode()));
+            pricedSkus.add(projected);
         }
         Product priced = product.withPricing(projection.product().salePrice(), projection.product().listPrice());
         return new PricedSource(priced, List.copyOf(pricedSkus));

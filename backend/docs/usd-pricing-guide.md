@@ -324,9 +324,11 @@ drift가 있어도 투영 자체는 실제 가격행을 선택하며, 별도 대
   read-only·REPEATABLE_READ 이상이 아니면 SQL 없이 `CALLER_TRANSACTION_REQUIRED` 로 거절한다. 입력 정규화·상한·조회 순서·예외 정제는 B1 과 같다.
 - D7: 가격행 누락·drift·snapshot 실패·상세 SKU 가 투영에 없음은 메시지 고정·cause 없는 `IllegalStateException` → 전역 처리기의 500 `COMMON_000` 이다.
   응답·예외·로그에 원문·ID·금액을 남기지 않고, 운영자용으로 사유 enum 이름만 담은 warn 한 줄을 남긴다.
-- `LEGACY`(기본)는 snapshot 포트를 부르지 않는다 — 추가 쿼리 0, 응답 동일(격리 수준만 REPEATABLE_READ). `PriceSourceModeGuard` 의 PRICE_BOOK 기동 거절은 B7 까지 유지한다.
+- `LEGACY`(기본)는 snapshot 포트를 부르지 않는다 — 추가 SELECT 0, 응답 동일. 다만 TX 시작 시 격리 수준을 REPEATABLE_READ 로 바꾸고 끝에 되돌리는
+  JDBC 왕복은 LEGACY 에도 있다. `PriceSourceModeGuard` 의 PRICE_BOOK 기동 거절은 B7 까지 유지한다.
 - 시험: 상세 Processor 모드별 단위 시험(투영 값 반영·네 실패 사유 정제·LEGACY 무호출), 어댑터 단위 시험(호출자 TX 조건·MANDATORY),
-  H2/PostgreSQL 통합 시험(호출자 TX 없음 거절, 첫 읽기 뒤 다른 TX 커밋에도 처음 시점 값·가짜 drift 없음·커넥션 1개).
+  H2/PostgreSQL 통합 시험(호출자 TX 없음 거절, 첫 읽기 뒤 다른 TX 커밋에도 처음 시점 값·가짜 drift 없음·커넥션 1개,
+  실제 `ProductWebUseCase` 프록시로 부른 PRICE_BOOK 상세의 투영 가격 응답·가격행 누락의 정제된 실패 — Facade TX 속성이 참여 조건을 만족하는지 지킨다).
 
 B 후속은 모든 고객·internal·admin reader, 목록 정렬·페이지/count·SKU 집계·display/look과 다섯 가격 writer,
 전체 Product 저장 경로를 같은 단일 정본으로 연결하는 작업이다. 동시 읽기 일관성·양방향 writer 경합·실패 rollback·혼합 배포와

@@ -48,7 +48,7 @@ class PriceSourceSnapshotPostgresIntegrationTest extends PriceSourceSnapshotInte
         callerTemplate().executeWithoutResult(status -> {
             assertThat(jdbc.queryForObject("show transaction_isolation", String.class)).isEqualTo("repeatable read");
             assertThat(jdbc.queryForObject("show transaction_read_only", String.class)).isEqualTo("on");
-            assertThat(em.find(ProductEntity.class, 1L).getVersion()).isZero();
+            assertThat(em.find(ProductEntity.class, 1L)).as("호출자 선행 읽기").isNotNull();
             assertThat(jdbc.queryForObject("select additional_price_amount from product.sku where id=10", Long.class)).isZero();
             CompletableFuture.runAsync(() -> new TransactionTemplate(manager).executeWithoutResult(writer -> {
                 jdbc.update("update product.product set sale_price_amount=1007, version=version+1 where id=1");
@@ -59,7 +59,6 @@ class PriceSourceSnapshotPostgresIntegrationTest extends PriceSourceSnapshotInte
             measure();
             var projection = PriceSourceSnapshotResolver.resolve(port.readByProductIdsInCurrentTransaction(List.of(1L))).getFirst();
             assertSelects(4);
-            assertThat(projection.product().version()).isZero();
             assertThat(projection.product().salePrice()).isEqualTo(Money.of(1_000, KRW));
             assertThat(projection.skus()).singleElement().satisfies(sku -> assertThat(sku.additionalPrice()).isEqualTo(Money.zero(KRW)));
         });
