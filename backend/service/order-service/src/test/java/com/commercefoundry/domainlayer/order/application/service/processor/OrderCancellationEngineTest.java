@@ -22,6 +22,7 @@ import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositor
 import com.commercefoundry.domainlayer.order.application.port.out.PaymentCancelPort;
 import com.commercefoundry.domainlayer.order.application.port.out.StockRestorationPort;
 import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelQueryResult;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentCancelVoidQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.ClaimItem;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
@@ -32,6 +33,7 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.domainlayer.order.domain.model.StatusChangedBy;
 import com.commercefoundry.global.properties.OrderCancellationProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
+import com.commercefoundry.shared.commerce.Money;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -122,9 +124,18 @@ class OrderCancellationEngineTest {
             return null;
         }).when(orders).saveStatusChange(any(), any());
         when(payments.findPaidByOrderId(ORDER)).thenAnswer(call -> Optional.of(paidRecord()));
-        PaymentCancelPort paymentCancelPort = (paymentId, claimId, amount) -> {
-            paymentCalls.add(paymentId + ":" + claimId + ":" + amount.amount() + " " + amount.currency());
-            return paymentAnswers.isEmpty() ? PaymentCancelQueryResult.succeeded() : paymentAnswers.poll();
+        PaymentCancelPort paymentCancelPort = new PaymentCancelPort() {
+            @Override
+            public PaymentCancelQueryResult cancel(long paymentId, long claimId, Money amount) {
+                paymentCalls.add(paymentId + ":" + claimId + ":" + amount.amount() + " " + amount.currency());
+                return paymentAnswers.isEmpty() ? PaymentCancelQueryResult.succeeded() : paymentAnswers.poll();
+            }
+
+            @Override
+            public PaymentCancelVoidQueryResult confirmNoRefund(long paymentId, long orderId, long claimId, Money amount) {
+                // 취소 엔진은 무환불 판정(#17 A4 취소 거절)을 부르지 않는다
+                throw new AssertionError("confirmNoRefund must not be called by the cancellation engine");
+            }
         };
         StockRestorationPort stockRestorationPort = new StockRestorationPort() {
             @Override
