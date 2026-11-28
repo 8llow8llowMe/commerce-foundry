@@ -22,6 +22,7 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 
 EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해제는 order-canceled 이벤트)
+CANCEL_REQUESTED ──▶ PAID (취소 정리 — 열린 취소 없이 일부 수량만 환불, #684 §1-4. Order#settleCancellation 만)
 RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일부만 환불 · 전부 거절, #17 B1. Order#settleReturn 만)
 ```
 
@@ -35,7 +36,8 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
 | `SHIPPING` | 송장 등록, 배송 중 | delivery-service (internal 출고 반영, #18 — §4) |
 | `DELIVERED` | 배송 완료 | delivery-service (internal 배송 완료 반영, #18 — §4). 어드민 수동 완료(사유 필수, #17)는 예외 경로 |
 | `PURCHASE_CONFIRMED` | 구매 확정 (고객 확정 또는 N일 경과 자동) | 고객 / 스케줄러 |
-| `CANCEL_REQUESTED` → `CANCELED` | 출고 전 취소 (환불 포함) | 고객 요청 → 환불 확정 시 자동(#16 PR-2, 어드민 승인 단계 없음). 환불 실패 · 미확정은 운영자(#17) |
+| `CANCEL_REQUESTED` → `CANCELED` | 출고 전 취소 (환불 포함) — 환불이 기록된 취소 수량이 주문 전 수량일 때 | 고객 요청 → 환불 확정 시 자동(#16 PR-2, 어드민 승인 단계 없음). 환불 실패 · 미확정은 운영자(#17) |
+| `CANCEL_REQUESTED` → `PAID` | 취소 정리 — 열린 취소(환불 대기 · 환불 실패) 없이 일부 수량만 환불됐을 때. 남은 수량을 출고한다 | 부분 취소 처리(#684, §1-4) — `Order#settleCancellation` 만. `changeStatus(PAID)` 는 도메인이 거절하고 어드민 상태 변경(PATCH)은 `ORDER_023` |
 | `PENDING_PAYMENT` → `CANCELED` | 결제 전 취소 (환불 없음, 선점 해제) | 고객 (#16) |
 | `RETURN_REQUESTED` → `RETURNED` | 배송 후 반품 (회수 후 환불) — 환불이 기록된 반품 수량이 주문 전 수량일 때 | 고객 요청 → 어드민 승인 · 환불(#17 B2) |
 | `RETURN_REQUESTED` → `DELIVERED` | 반품 정리 — 열린 반품(접수 · 승인 · 환불 실패) 없이 일부만 환불됐거나 전부 거절됐을 때. 배송 완료 시각은 그대로다 | 반품 처리(#17 B2) — `Order#settleReturn` 만. 어드민 상태 변경(PATCH)은 `ORDER_023` |
@@ -58,8 +60,9 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
   응답은 그 시점 상세다 — 환불 확정이면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(200). 이미 취소 요청 · 취소 완료이고 취소 클레임이 있으면 다시 돌리지 않고
   현재 상세 200 이다(더블 클릭 — 잠금 · 버전 · 결정적 키에서 진 쪽도 다시 읽어 같으면 200, 다시 판정할 수 없으면 409 `ORDER_025`). 결제 완료 기록(`order_payment` PAID)이
   없으면 500 `ORDER_033`, 전체 취소액이 승인 금액과 다르면 500 `ORDER_034` 로 접수하지 않는다.
-  **취소 거절 전이(`CANCEL_REQUESTED` → 원래 상태)는 표에 넣지 않는다** — `REFUND_FAILED` 어드민 처리와 함께 #17 · PR-2b 에서 정한다. 그때까지 환불 거절 주문은
-  `CANCEL_REQUESTED` 로 남고 출고하지 않는다.
+  **취소 거절 전이(`CANCEL_REQUESTED` → 원래 상태, A4)는 표에 넣지 않는다** — 환불 실패(`REFUND_FAILED`)의 출구는 운영자 수동 확정 · 재시도다(#17 A1 · §5).
+  환불 거절 주문은 `CANCEL_REQUESTED` 로 남고 출고하지 않는다. 표에 있는 `CANCEL_REQUESTED → PAID` 는 거절이 아니라 부분 취소의 **환불이 확정된 뒤**의 정리다(§1-4)
+  — 환불이 나가지 않은 취소로 결제 완료에 돌아가는 길은 없다.
 - **결제 전 취소** (`Order#cancelBeforePayment`): 상태 · `CUSTOMER` 이력(사유 = 취소 사유 코드) · `order-canceled` outbox 를 한 트랜잭션으로 쓴다(§3-5).
   이미 취소됐으면 아무것도 쓰지 않고 성공이다. 읽은 뒤 결제 완료 · 만료가 먼저 커밋하면 `@Version` 비교로 롤백하고 다시 읽는다 — 취소 완료면 200,
   결제 완료 · 상품 준비중 · 제작 중이면 결제 후 취소로 넘기고(#16 PR-2), 그 밖(만료 등)은 409 `ORDER_020` 이다.
@@ -78,7 +81,8 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
   — 시각 없이 배송 중 · 배송 완료가 되지 않게. 어드민 수동 배송 완료(#17)도 `deliver(now)` 를 거쳐 `delivered_at` 을 채운다. 이미 그 뒤 상태면(`ship` 은 배송 중 ·
   배송 완료 · 구매 확정 · 반품, `deliver` 는 배송 완료 · 구매 확정 · 반품 — 전이 표에서 배송 중 · 배송 완료로부터 닿는 상태와 같고 `OrderTest` 가 표로 계산해 맞춘다)
   바꾸지 않은 값을 돌려주고 처음 시각을 덮지 않는다. 그 밖은 `ORDER_020` 이다 — 상품 준비중에서 바로 배송 완료하지 않는다. 취소 요청(`CANCEL_REQUESTED`) 주문도
-  출고하지 않는다 — 먼저 취소를 처리한다. 취소 거절 전이(취소 요청 → 상품 준비중)는 표에 없다(#17 · #16 PR-2b, 위 "결제 후 취소").
+  출고하지 않는다 — 먼저 취소를 처리한다. 취소 거절 전이(취소 요청 → 원래 상태)는 표에 없다(위 "결제 후 취소"). 부분 취소가 정리돼 결제 완료로 돌아간 주문은
+  남은 수량만 출고한다(§1-4).
   `delivered_at` 은 자동 구매 확정(#18 PR-C)의 기준이고 `idx_orders_status_delivered_at_id(status, delivered_at, id)` 로 읽는다.
   두 칸이 생기기 전에 배송 중 · 배송 완료가 된 주문은 **배포 전 운영 SQL(PR 본문)** 로 상태 이력 시각을 채운다 — 채우지 못한 행은 null 로 남을 수 있어
   상태와 묶는 check 를 두지 않는다.
@@ -88,9 +92,10 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
 ### 1-2. 동시성
 
 - `EXPIRED → PAID`는 만료 후 결제 확인, 같은 주문의 재선점, 선점 확정의 **200 · CONFIRMED 응답**을 모두 확인한 경우에만 허용한다. 위 도식의 만료에서 PAID로 복귀하는 조건부 경로다 (`payment-guide.md` §6 · 이 문서 §3-4). 재선점 실패 시 전액 취소한다.
-- **결제 완료 전이는 `Order#markPaid(reservationId)` 하나다 (#308 PR-B1).** 결제 대기 · 만료 → `PAID` 이고 재고 선점 아이디를 확정 200 을 받은 선점으로 바꾼다 —
+- **결제로 인한 결제 완료 전이는 `Order#markPaid(reservationId)` 하나다 (#308 PR-B1).** 결제 대기 · 만료 → `PAID` 이고 재고 선점 아이디를 확정 200 을 받은 선점으로 바꾼다 —
   그 밖의 상태(이미 결제 완료 · 취소 등)는 `OrderStatusTransitionException` 이다. 부르기 전에 진위 확인(payment 재조회) · 결제 대조 · 확정 200 을 끝낸다(§3-4).
   이력은 `OrderStatusHistory.changedByService(…, PAYMENT_APPROVED)`(주체 `SERVICE`), 결제 연결은 주문 행이 아니라 `orders.order_payment`(아래)에 남긴다.
+  취소 요청 → `PAID` 는 결제가 아니라 부분 취소 정리이고 `Order#settleCancellation` 만 한다(§1-4) — 선점 · `order_payment` 를 건드리지 않는다.
   부르는 컨슈머(`payment-approved`)는 PR-B2 다 — 주문 상태 · 이력 · `order_payment` · inbox · 회신 outbox 를 한 트랜잭션으로 쓴다.
 - **결제 반영 기록 `orders.order_payment`** (#308 PR-B1, `OrderPaymentRepositoryPort`) — 결제당 한 행(`uk_order_payment_payment_id`), 주문당 결제 완료 하나
   (`paid_order_id` 는 결과 `PAID` 일 때만 주문 아이디, 아니면 null — `uk_order_payment_paid_order_id`). 결과는 `PAID` 또는 거절 `REJECTED_*`(회신 reason
@@ -123,6 +128,70 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
 - #308 PR-B1 이 더한 `orders.processed_event`(inbox) · `orders.order_payment` 도 같은 스냅숏에서 가져와 **DDL 적용 → 배포** 순서로 넣는다(`ddl-auto=none` 이라 앱이 만들지 않는다).
   order 의 `MESSAGING_ENABLED` 가 켜진 환경이면 `processed_event` 가 배포 전에 있어야 한다 — inbox 빈이 생겨 messaging-core 정리가 이 테이블을 지우려 하고, 없으면 주기마다
   정리 WARN 이 난다. `order_payment.result` 의 값 목록 check 는 Hibernate 가 이름 없이 만든다 — 결과 값을 더하면 그 check 를 지우고 다시 만드는 운영 DDL 이 필요하다.
+
+### 1-4. 결제 후 부분 취소 (#684)
+
+결제 완료 · 출고 전 주문에서 고객이 일부 항목 · 수량만 취소한다. 설계 정본은 #684 댓글 "설계 확정 (2026-11-27)" 이다. payment-service · product-service 는 바꾸지 않는다 —
+부분 취소 한도(`PAYMENT_017`) · 겹침(`PAYMENT_016`) · 클레임 아이디 멱등 복원이 이미 있다. DDL 은 없다.
+
+PR 분할과 이 절의 범위:
+
+| PR | 범위 | 상태 |
+|----|------|------|
+| PR-1 | 도메인 · 저장 기반 — 아래 상태 모델 · 산식 · 정리 판정 · 취소 수량 합 질의. **부르는 곳이 없다** | 이 PR |
+| PR-2 | 취소 엔진 일반화 — 부분 취소 뒤 전체 취소는 남은 금액만 환불, 클레임 아이디 재조회, tx2 가 `completeCancellation` 대신 정리 판정 → `settleCancellation`, 어드민 수동 확정 · 복원 생략 종결의 `PAID` 복귀 | 남음 |
+| PR-3 | 하류 수량 보정 — 반품 산식 · 반품 가능 수량(주문 − 취소 − 반품) · 피킹 스냅숏 잔여 수량 · 어드민 상세 `canceledQuantity`. **PR-4 보다 먼저 머지한다**(뒤집히면 초과 출고) | 남음 |
+| PR-4 | 고객 API `POST /api/v1/orders/{orderId}/partial-cancellations` · `.../quotes`, 플래그 `order.cancellation.partial-enabled`(기본 false), 오류 `ORDER_047`~`051`, 주문 상세 칸. **PR-2 · PR-3 뒤에 머지한다** — 기존 전체 취소 엔진은 총액 환불 · 결정적 키 재조회 · `completeCancellation` 이라 그 전에 부분 취소가 들어오면 돈 · 주문 · 재고가 갈라진다. 플래그 기본값만으로 막지 않는다 | 남음 |
+
+**상태 모델**
+
+- 기존 `CANCEL_REQUESTED` 를 "취소 진행 중"으로 쓴다. 부분 취소 접수도 주문을 `CANCEL_REQUESTED` 로 바꾸고, 그동안 주문 전체의 출고가 보류된다(사용자 결정 Q3).
+- 환불이 확정되면 **취소 정리**를 한다 — `CancellationRefundPolicy#outcome(order, claims)` 가 다음 상태를 판정하고 `Order#settleCancellation(outcome)` 이 바꾼다.
+  - 환불이 기록된 취소(`Claim#isSettledCancellation` — `REFUNDED` · `RESTORATION_FAILED` · `COMPLETED`)의 수량 합이 모든 주문 수량이면 `CANCELED`
+  - 열린 취소(`Claim#isOpenCancellation` — `REQUESTED` · `REFUND_FAILED`)가 남아 있으면 `CANCEL_REQUESTED` 유지(`STILL_REQUESTED`)
+  - 그 밖(열린 취소 없이 일부만 환불)이면 `PAID` 로 돌아간다 — 이력 `SERVICE` · `PARTIAL_CANCELLATION_REFUNDED`(`OrderStatusHistory#cancellationSettled`).
+    전량이면 기존과 같은 `CANCELLATION_REFUNDED` 다.
+- `CANCEL_REQUESTED → PAID` 는 `settleCancellation` 만 한다. `changeStatus(PAID)` 는 도메인이 거절하고, 어드민 직접 전이 표(`AdminStatusChangePolicy`)에도 없어
+  PATCH 는 `ORDER_023` 이다(전에는 표 밖이라 `ORDER_020`). 이미 목표 상태면 바꾸지 않은 값을 돌려준다 — 확정 반영 재시도가 안전하다.
+  단 `PAID` 는 끝 상태가 아니다 — 정리 뒤 운영자가 상품 준비중으로 넘긴 주문에 같은 클레임의 복원 재시도 · 수동 확정이 정리를 다시 부르면 전이 예외다.
+  PR-2 는 정리를 **환불이 기록되는 전이**(환불 대기 · 환불 실패 → 환불 완료)에서만 부르고, 복원 단계(환불 완료 → 완료)에서는 부르지 않는다.
+- `outcome` 은 데이터 이상을 판정하지 않고 `IllegalStateException` 을 던진다 — 취소에 잡힌 수량이 주문 수량을 넘음, 주문에 없는 항목, 열린 취소도 환불이 기록된
+  취소도 없음(전부 거절은 취소 거절 전이 A4 몫이라 원래 상태를 알 수 없다). 다른 주문의 클레임은 `IllegalArgumentException` 이다.
+  부르는 쪽(PR-2)은 반품 정리(§5 B2c-2 "fail-closed")와 같게 한다 — 예외로 tx2 를 통째로 되돌리지 않는다(환불은 이미 나갔다). 환불 기록은 남기고 클레임을
+  `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`)로, 주문은 `CANCEL_REQUESTED` 에 둔다.
+- 판정 입력은 **주문 잠금 뒤 읽은 클레임 목록에 이번 클레임의 갱신 결과(환불 완료)를 바꿔 넣은 것**이다. 갱신 전 목록으로 판정하면 이번 클레임이 열린 취소로 보여
+  `STILL_REQUESTED` 가 나오고, 열린 취소 없이 `CANCEL_REQUESTED` 에 멈춘 주문(남은 수량을 출고하지 못함)이 생긴다.
+- 부분 취소 접수는 `PAID` 만 받는다(`OrderStatus#acceptsPartialCancellation`, 사용자 결정 Q1). 상품 준비중은 피킹 묶음이 수량을 스냅숏하고, 제작 중은 전체 취소만 받는다.
+
+**항목 수량**
+
+- 항목 상태 칸은 두지 않는다. 항목의 취소 수량 = 거절이 아닌 취소 클레임(`Claim#reservesCancellationQuantity`)의 `claim_item` 수량 합이다.
+  열린 취소도 넣는다 — 빼면 같은 수량을 다시 접수해 이중 환불이 된다.
+- 질의는 `ClaimRepositoryPort#sumCanceledQuantities(orderId)` · `#sumCanceledQuantitiesByOrderIds(orderIds)`(피킹 잔여 수량 · 어드민 상세용, 한 질의 · `OrderItemClaimQuantityQueryResult`)
+  다. 빈 입력은 질의 없이 빈 맵이고, IN 절 길이는 부르는 쪽이 페이지 크기로 제한한다.
+- 수량 맵 팩토리 `Claim.requestCancellation(id, order, requestKey, quantities, …)` 로 항목별 수량을 받는다. 기존 전체 취소 팩토리는 이 팩토리에 위임한다.
+- 고객 멱등 키가 결정적 전체 취소 키(`Claim.cancellationRequestKey(orderId)`)와 같으면 부분 취소로 받지 않는다(`Claim.isReservedCancellationKey`) — 같은 행
+  (`uk_claim_order_id_request_key`)을 가리켜 전체 취소 재요청이 부분 취소 클레임을 "이미 접수된 전체 취소"로 읽는다.
+
+**불변식 · 동시성**
+
+- 주문당 열린 취소 클레임은 하나다. 접수는 주문 행 잠금(NOWAIT)과 상태 전이(`PAID → CANCEL_REQUESTED`, `@Version`)로 보장한다 — 열린 취소가 있으면 주문이 이미
+  `CANCEL_REQUESTED` 라 두 번째 부분 취소는 접수 상태 판정에서 막힌다.
+
+**환불 산식** (`CancellationRefundPolicy`, 주문 시점 스냅숏만 — §2 "클레임의 배송비 재부과는 주문 스냅숏으로")
+
+- `refund(order, alreadyCanceled, toCancel) = due(before) − due(after)` 이고, `due` 는 남은 수량으로 받아야 할 금액(상품 + 배송비)이다. 원주문의 배송비는
+  `총액 − 상품 합계`, 전부 취소면 0 이다.
+- `breakdown(...)` 은 같은 값을 `RefundBreakdown(itemsAmount, shippingFeeRefund, shippingFeeRecharge, currency)` 로 나눈다 — `itemsAmount = items(before) − items(after)`,
+  배송비 차이가 양수면 재부과(`shippingFeeRecharge`), 음수면 배송비 환불(`shippingFeeRefund`)이다. 내역 합은 늘 `refund` 와 같다.
+- 부분 취소를 순서대로 다 하면 환불 합은 결제 총액과 같다(망원 합). 소액 항목 취소로 재부과가 취소 금액 이상이면 0 이하다 — `isPayable()` 이 false 이고 접수하지 않는다
+  (PR-4 409 `ORDER_050`, 사용자 결정 Q2). 0 으로 깎거나 추가 결제를 받지 않는다.
+
+**알려진 한계**
+
+- 취소 클레임의 `PAYMENT_016`(겹침)은 지금 거절로 분류된다. 앞 부분 취소를 수동 확정해 payment 원장이 PENDING 으로 남은 드문 경우다 — #693 order 2단계와 함께 정한다.
+- 취소 거절 전이(A4)가 없어 결제사가 종결 거절하면 출구는 수동 환불 확정뿐이다.
+- PR-3 전까지 `ReturnRefundPolicy` 는 거절이 아닌 취소 클레임이 있으면 예외를 던진다. 고객 부분 취소 API(PR-4) 전이라 운영 동작에는 영향이 없다.
 
 ## 2. 주문 금액
 
