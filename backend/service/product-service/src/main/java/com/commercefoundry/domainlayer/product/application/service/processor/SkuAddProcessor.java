@@ -47,7 +47,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class SkuAddProcessor {
 
-    /** 등록과 같은 상한. */
+    /** 상품당 SKU 상한(SKU_ADMIN_010) — 등록(PRODUCT_095)과 같다. 서비스 간 SKU 조회의 snapshot 묶음 크기가 이 값에 기댄다({@code SkuInternalSnapshotChunkLimitTest}). */
     static final int MAX_SKUS = 100;
     static final int MAX_VALUES_PER_GROUP = 50;
     static final String INITIAL_STOCK_MEMO = "SKU 추가 초기 재고";

@@ -68,10 +68,11 @@ public class SkuInternalProcessor {
 
     private static final String OPTION_NAME_DELIMITER = " / ";
     /**
-     * snapshot 한 번에 읽는 상품 수. 포트 상한(상품 50 · SKU 2000행)보다 작게 잡는다 — 상품당 SKU 가 최대 100개(PRODUCT_095 · SKU_ADMIN_102)라
-     * 20개 묶음이면 SKU 가 2000행을 넘지 않는다. 넘으면 ROW_LIMIT_EXCEEDED 500 이 되어 order-service 서킷 실패로 세어진다.
+     * snapshot 한 번에 읽는 상품 수. 포트 상한({@link PriceSourceSnapshotRepositoryPort#MAX_PRODUCTS} · {@link PriceSourceSnapshotRepositoryPort#MAX_SKU_ROWS})보다
+     * 작게 잡는다 — 상품당 SKU 가 최대 100개(등록 PRODUCT_095 · 추가 SKU_ADMIN_010 = {@code SkuAddProcessor.MAX_SKUS})라 20개 묶음이면 SKU 가 2000행을 넘지 않는다.
+     * 넘으면 ROW_LIMIT_EXCEEDED 500 이 되어 order-service 서킷 실패로 세어진다. 이 관계는 {@code SkuInternalSnapshotChunkLimitTest} 가 고정한다.
      */
-    private static final int SNAPSHOT_CHUNK_PRODUCTS = 20;
+    static final int SNAPSHOT_CHUNK_PRODUCTS = 20;
     private static final String PRICE_SOURCE_SKU_MISMATCH = "SKU_NOT_IN_PROJECTION";
     private static final String PRICE_SOURCE_FAILURE_MESSAGE = "서비스 간 SKU 조회 가격 원천을 사용할 수 없습니다";
     private static final Comparator<ResolvedOption> GROUP_ORDER = Comparator
@@ -214,7 +215,10 @@ public class SkuInternalProcessor {
         return projections;
     }
 
-    /** 운영자용 정제 로그 한 줄(뺀 상품 수 · 사유별 건수)과 사유별 지표. 아이디 · 금액은 남기지 않는다. */
+    /**
+     * 운영자용 정제 로그 한 줄(이 요청에서 뺀 상품 수 · 사유별 건수)과 사유별 지표. 아이디 · 금액은 남기지 않는다.
+     * 요청마다 남긴다 — 같은 상품이 장바구니 조회마다 다시 세어지므로 지표는 고유 상품 수가 아니라 요청 × 상품 건수다(rate-limit 없음).
+     */
     private void reportExclusions(Map<Long, String> exclusions) {
         if (exclusions.isEmpty()) {
             return;

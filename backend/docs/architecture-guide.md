@@ -99,6 +99,7 @@ com.commercefoundry
   |  |     |- log               (선택 — 관리자 감사에 DB 싱크가 있을 때만(auth). 기본은 domainlayer/adminaudit Processor + core AdminAuditLog, security-guide.md §11-4)
   |  |     |- event             (*EventAdapter — Kafka 로 나갈 메시지를 outbox 에 쓴다, coding-conventions.md §12)
   |  |     |- lock              (*LockAdapter — 단일 실행 락 ShedLock, 예: 정기 작업 플래너)
+  |  |     |- observation       (지표 · 관측 *MetricsAdapter — Micrometer, 실패는 삼켜 응답을 바꾸지 않는다. 예: payment-service · product-service 가격 원천)
   |  |     \- client
   |  |        |- feign          (내부 서비스 Feign *Client)
   |  |        |- pg             (PG 연동 — toss / paypal, payment-service)
