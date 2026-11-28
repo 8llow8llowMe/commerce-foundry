@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.legaldraftgeneration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -42,6 +43,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
@@ -77,6 +79,7 @@ class LegalDraftGenerationFlowTest extends ResourceServerSmokeTestSupport {
     @Autowired JobClaimProcessor claims;
     @Autowired JobRunProcessor runs;
     @Autowired Environment environment;
+    @Autowired JdbcTemplate jdbc;
 
     @Test
     void defaultOffAndActualJwtPermissions() throws Exception {
@@ -133,6 +136,26 @@ class LegalDraftGenerationFlowTest extends ResourceServerSmokeTestSupport {
         assertThat(data(admin(post(PATH + "/" + id + "/review")), 200).get("reviewedAt").stringValue()).isEqualTo(reviewed);
         assertThat(admin(get("/api/v1/admin/store/legal-documents/PRIVACY/en")).getStatus()).isEqualTo(404);
         assertThat(perform(get(PUBLIC).param("locale", "en")).getStatus()).isEqualTo(404);
+    }
+
+    @Test
+    void resultFromAnOlderTemplateVersionHasNoCandidateAndCannotBeReviewed() throws Exception {
+        doReturn(true).when(gate).enabled();
+        when(client.complete(any(AiRequest.class), org.mockito.ArgumentMatchers.eq(LegalDraftPlan.class)))
+            .thenReturn(new AiStructuredResult<>(new LegalDraftPlan(SECTIONS), "stub", 0, 0, "stop", "stub"));
+        long id = registerDirect(key());
+        // H2 는 나노초를 마이크로초로 반올림해 저장하므로 등록 직후에는 예약 시각이 아주 잠깐 미래일 수 있다 — 가져갈 때까지 다시 시도한다.
+        await().atMost(Duration.ofSeconds(5)).until(() -> claims.claim(id, 0, LegalDraftJobProcessor.TYPE, "test", Duration.ofMinutes(5)).job() != null);
+        assertThat(runs.succeed(id, "test", 1, worker.execute(execution(id)).resultJson())).isTrue();
+        // 배포로 시작 템플릿 버전이 바뀐 상황 — 영수증에 남은 입력 버전(유효한 값 2)이 현재 템플릿(1)과 달라진다.
+        assertThat(jdbc.update("update operations.legal_draft_generation_receipt set input_json = replace(input_json, ?, ?) where job_id = ?",
+            "\"templateVersion\":1", "\"templateVersion\":2", id)).isEqualTo(1);
+
+        var result = data(admin(get(PATH + "/" + id)), 200);
+        assertThat(result.get("status").get("code").stringValue()).isEqualTo("SUCCEEDED");
+        assertThat(result.get("candidate").isNull()).isTrue();
+        assertThat(result.get("notice").stringValue()).isEqualTo("시작 템플릿이 바뀌어 이전 결과를 다시 만들 수 없습니다.");
+        failure(admin(post(PATH + "/" + id + "/review")), 409, "LEGAL_DRAFT_GENERATION_004");
     }
 
     @Test
