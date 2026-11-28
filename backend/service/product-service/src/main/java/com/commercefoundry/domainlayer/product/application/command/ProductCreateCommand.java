@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.product.application.command;
 
+import com.commercefoundry.domainlayer.product.domain.model.ProductImageManagedSource;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.shared.commerce.Money;
 import java.time.LocalDate;
@@ -29,7 +30,30 @@ public record ProductCreateCommand(
         customOrder = customOrder == null ? ProductCustomOrderCommand.disabled() : customOrder;
     }
 
-    public record Image(String uploadKey, com.commercefoundry.domainlayer.product.domain.model.ImageType imageType, String altText) {
+    /**
+     * 첨부할 이미지 — 원본은 둘 중 하나다. 관리 원본이 있으면 업로드 키는 없다. 둘 다 없으면 업로드 키가 없는 것으로 보고 첨부가 400 {@code PRODUCT_032} 로 거절한다.
+     *
+     * @param uploadKey 어드민이 올린 임시 업로드 키(#9 F2). 요청한 어드민 소유만 붙는다
+     * @param managedSource 고정한 상품 미디어 원본(#359 C1) — 서버가 AI 상품 초안에서 만든다. 어드민 요청 본문에서 오지 않는다
+     */
+    public record Image(String uploadKey, ProductImageManagedSource managedSource,
+                        com.commercefoundry.domainlayer.product.domain.model.ImageType imageType, String altText) {
+
+        public Image {
+            if (uploadKey != null && managedSource != null) {
+                throw new IllegalArgumentException("이미지 원본은 업로드 키와 관리 원본 중 하나여야 합니다.");
+            }
+        }
+
+        /** 어드민이 올린 임시 업로드 키로 붙이는 이미지(#9 F2). */
+        public Image(String uploadKey, com.commercefoundry.domainlayer.product.domain.model.ImageType imageType, String altText) {
+            this(uploadKey, null, imageType, altText);
+        }
+
+        /** 고정한 상품 미디어 원본으로 붙이는 이미지(#359 C1). */
+        public static Image managed(ProductImageManagedSource source, com.commercefoundry.domainlayer.product.domain.model.ImageType imageType, String altText) {
+            return new Image(null, java.util.Objects.requireNonNull(source, "source"), imageType, altText);
+        }
     }
 
     /** @param values 값 이름 (배열 순서 = 노출 순서) */
