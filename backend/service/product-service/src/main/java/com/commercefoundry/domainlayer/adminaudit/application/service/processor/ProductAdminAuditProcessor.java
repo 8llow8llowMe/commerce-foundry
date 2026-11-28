@@ -130,6 +130,16 @@ public class ProductAdminAuditProcessor {
             id == null ? null : AdminAuditLog.target("media-upload", id.toString()), succeeded);
     }
 
+    public void mediaVideoUploadIssued(long actorMemberId, java.util.UUID id, boolean succeeded) {
+        write(ProductAdminAuditAction.MEDIA_VIDEO_UPLOAD_ISSUE, actorMemberId,
+            id == null ? null : AdminAuditLog.target("media-upload", id.toString()), succeeded);
+    }
+
+    public void mediaVideoUploadConfirmed(long actorMemberId, java.util.UUID id, boolean succeeded) {
+        write(ProductAdminAuditAction.MEDIA_VIDEO_UPLOAD_CONFIRM, actorMemberId,
+            id == null ? null : AdminAuditLog.target("media-upload", id.toString()), succeeded);
+    }
+
     /** @param sectionId 만든 섹션 아이디 — 실패해 없으면 {@code null}({@code target=-}) */
     public void displaySectionCreated(long actorMemberId, Long sectionId, boolean succeeded) {
         write(

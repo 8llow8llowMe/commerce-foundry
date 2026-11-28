@@ -136,6 +136,21 @@ class ProductAdminAuditProcessorTest {
         );
     }
 
+    @Test
+    void mediaVideoUploadsContainOnlyFourAuditFieldsAndInternalUuid() {
+        var id = java.util.UUID.fromString("22222222-2222-2222-2222-222222222222");
+        processor.mediaVideoUploadIssued(ACTOR, id, true);
+        processor.mediaVideoUploadIssued(ACTOR, null, false);
+        processor.mediaVideoUploadConfirmed(ACTOR, id, true);
+        processor.mediaVideoUploadConfirmed(ACTOR, null, false);
+        assertThat(lines()).containsExactly(
+            "action=MEDIA_VIDEO_UPLOAD_ISSUE actorMemberId=" + ACTOR + " target=media-upload:" + id + " result=SUCCESS",
+            "action=MEDIA_VIDEO_UPLOAD_ISSUE actorMemberId=" + ACTOR + " target=- result=FAILURE",
+            "action=MEDIA_VIDEO_UPLOAD_CONFIRM actorMemberId=" + ACTOR + " target=media-upload:" + id + " result=SUCCESS",
+            "action=MEDIA_VIDEO_UPLOAD_CONFIRM actorMemberId=" + ACTOR + " target=- result=FAILURE"
+        );
+    }
+
     private List<String> lines() {
         return audit.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
     }

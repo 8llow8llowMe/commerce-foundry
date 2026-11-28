@@ -4,8 +4,8 @@ import com.commercefoundry.domainlayer.adminaudit.application.service.processor.
 import com.commercefoundry.domainlayer.mediaupload.adapter.in.admin.dto.response.MediaImageUploadResponse;
 import com.commercefoundry.domainlayer.mediaupload.adapter.in.admin.presenter.MediaImageUploadAdminPresenter;
 import com.commercefoundry.domainlayer.mediaupload.application.port.in.MediaImageUploadAdminUseCase;
-import com.commercefoundry.domainlayer.mediaupload.application.service.processor.MediaImageUploadProcessor;
-import com.commercefoundry.domainlayer.mediaupload.domain.model.MediaImageUploadKey;
+import com.commercefoundry.domainlayer.mediaupload.application.service.processor.MediaUploadProcessor;
+import com.commercefoundry.domainlayer.mediaupload.domain.model.MediaKind;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 // Storage I/O must not hold or join a caller's database transaction.
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 public class MediaImageUploadAdminFacade implements MediaImageUploadAdminUseCase {
-    private final MediaImageUploadProcessor processor;
+    private final MediaUploadProcessor processor;
     private final MediaImageUploadAdminPresenter presenter;
     private final ProductAdminAuditProcessor audit;
 
@@ -26,8 +26,8 @@ public class MediaImageUploadAdminFacade implements MediaImageUploadAdminUseCase
         UUID id = null;
         boolean succeeded = false;
         try {
-            var info = processor.issue(actorId, contentType, contentLength);
-            id = processor.parseKey(info.uploadKey()).id();
+            var info = processor.issue(actorId, MediaKind.IMAGE, contentType, contentLength);
+            id = processor.parseKey(MediaKind.IMAGE, info.uploadKey()).id();
             var response = presenter.toResponse(info);
             succeeded = true;
             return response;
@@ -41,7 +41,7 @@ public class MediaImageUploadAdminFacade implements MediaImageUploadAdminUseCase
         UUID id = null;
         boolean succeeded = false;
         try {
-            var key = processor.parseKey(uploadKey);
+            var key = processor.parseKey(MediaKind.IMAGE, uploadKey);
             id = key.id();
             var response = presenter.toResponse(processor.confirm(actorId, key));
             succeeded = true;

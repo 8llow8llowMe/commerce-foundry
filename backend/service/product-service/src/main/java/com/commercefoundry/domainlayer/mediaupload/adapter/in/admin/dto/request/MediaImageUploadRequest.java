@@ -1,7 +1,7 @@
 package com.commercefoundry.domainlayer.mediaupload.adapter.in.admin.dto.request;
 
 import com.commercefoundry.domainlayer.mediaupload.application.exception.MediaUploadValidationMessage;
-import com.commercefoundry.domainlayer.mediaupload.domain.model.MediaImageFormat;
+import com.commercefoundry.domainlayer.mediaupload.domain.model.MediaKind;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -18,6 +18,6 @@ public record MediaImageUploadRequest(
     @Schema(description = "파일 바이트 수", example = "1024")
     @NotNull(message = MediaUploadValidationMessage.LENGTH_REQUIRED)
     @Min(value = 1, message = MediaUploadValidationMessage.LENGTH_MIN)
-    @Max(value = MediaImageFormat.MAX_BYTES, message = MediaUploadValidationMessage.LENGTH_MAX)
+    @Max(value = MediaKind.IMAGE_MAX_BYTES, message = MediaUploadValidationMessage.LENGTH_MAX)
     Long contentLength
 ) {}

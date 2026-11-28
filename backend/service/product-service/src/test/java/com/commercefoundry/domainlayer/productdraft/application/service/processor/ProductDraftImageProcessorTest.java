@@ -96,9 +96,10 @@ class ProductDraftImageProcessorTest {
             "products/media/7/0f8fad5b-d9cb-469f-a165-70867728950e/short.png",
             "products/media/0/0f8fad5b-d9cb-469f-a165-70867728950e/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png",
             "products/media/7/0f8fad5b-d9cb-469f-a165-70867728950e/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.gif",
+            "products/media/7/0f8fad5b-d9cb-469f-a165-70867728950e/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mp4",
             "legacy/cafe24/a.jpg"
         })
-        @DisplayName("허용 패턴(products/media/{actor}/{UUID}/{SHA-256}.{jpg|png|webp}) 밖 키는 031 이다 — 업로드 원본 · 상품별 키 · 이관 이미지")
+        @DisplayName("허용 패턴(products/media/{actor}/{UUID}/{SHA-256}.{jpg|png|webp}) 밖 키는 031 이다 — 업로드 원본 · 상품별 키 · 이관 이미지 · 전시 영상(#796)")
         void keyOutsidePattern(String key) {
             managed(key);
             assertCode(() -> processor.pin(List.of(image(key, ProductDraftImageType.THUMBNAIL))), ProductDraftErrorCode.IMAGE_NOT_MANAGED);
