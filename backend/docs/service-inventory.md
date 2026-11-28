@@ -48,8 +48,8 @@ PR-2b-2 에서 product 전용 등록 · 결과 조회 internal(`/internal/v1/pro
 (`operations.product_draft_generation_receipt`), 플래그 `operations.product-draft-generation.enabled`(기본 닫힘)를 더했다. product 연결은 PR-3 이다.
 계약은 `api-design-guide.md` §2-14(product) · §7-3(operations)이다.
 
-product-service는 전시 · 룩 공용 이미지 업로드 발급/확정도 맡는다(#508, `domainlayer/mediaupload`).
-`/api/v1/admin/displays/image-uploads`(`CATALOG_MANAGE`)에서 storage-core를 통해 직접 PUT 서명과 검증된 공개 복사를 제공한다.
+product-service는 전시 · 룩 공용 이미지 업로드(#508)와 메인 전시 영상 업로드(#796, MP4 · 100MiB) 발급/확정도 맡는다(`domainlayer/mediaupload`).
+`/api/v1/admin/displays/image-uploads` · `/api/v1/admin/displays/video-uploads`(`CATALOG_MANAGE`)에서 storage-core를 통해 직접 PUT 서명과 검증된 공개 복사를 제공한다.
 기존 전시 · 룩 저장은 공개 URL 계약을 유지한다. DB/참조 원장/파일 GC는 추가하지 않으며 보관과 운영 한계는
 [display-media-upload-guide.md](display-media-upload-guide.md)를 따른다.
 

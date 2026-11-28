@@ -810,6 +810,10 @@ FE는 code로 분기하고 name/description을 표시한다(계약 검토자 `se
 JPEG · PNG · WebP, 1바이트~10MiB만 허용한다. 업로드 키는 canonical lowercase UUID.ext basename이다.
 잘못된 키/형식/크기는 400, 없는 객체/타인 namespace는 동일 404, 원본 변경은 409, 비활성/저장소 실패는 503(MEDIA_UPLOAD_ 접두어)다.
 확정 publicUrl을 기존 전시 pcUrl/mobileUrl 또는 룩 image.url에 저장한다. width/height는 모르면 생략하며 서버에서 계산하지 않는다.
+전시 영상 업로드(#796): 같은 권한 · 흐름 · 응답으로 `POST /api/v1/admin/displays/video-uploads`와
+`POST /api/v1/admin/displays/video-uploads/{uploadKey}/confirm`을 둔다. MP4(video/mp4)만, 1바이트~100MiB이고 키는 `UUID.mp4`다.
+확정은 HEAD 크기 · MIME과 앞부분 ISO BMFF ftyp box(MP4 계열 brand)를 검증한다. 영상 오류 코드는 MEDIA_UPLOAD_008~012 · 107~110이고, 이미지와 같이 쓰는 002 · 005(409) · 103 · 104도 돌려준다.
+확정 publicUrl은 전시 VIDEO의 pcUrl/mobileUrl에 넣고, 대표 사진(pcPosterUrl/mobilePosterUrl)은 이미지 업로드 API의 publicUrl을 넣는다.
 조건부 검증/복사, 보관 정책과 FE 흐름의 정본은 [display-media-upload-guide.md](display-media-upload-guide.md)다.
 
 메인 화면의 섹션(블록)을 어드민이 바꾼다. 섹션 유형은 브랜드와 무관한 블록 이름(`HERO` · `PRODUCT_PICK` · `STORY` · `LOOK` · `DETAIL`)이고,
