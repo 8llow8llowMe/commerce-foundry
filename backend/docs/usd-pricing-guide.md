@@ -300,10 +300,20 @@ ADMIN 인가와 감사 원칙을 유지하고 가격 원문을 감사 로그에 
 drift가 있어도 투영 자체는 실제 가격행을 선택하며, 별도 대조 호출이 legacy 판매가·nullable 정가·전체 SKU 추가금의 차이를 거절한다.
 어느 동작도 값을 보완·저장하지 않는다. 신규 DB 조회·Port·SQL·reader 연결·가격 writer 전환은 포함하지 않는다.
 
-`price-source.mode`(`PRICE_SOURCE_MODE`)는 미설정·null·빈값과 `LEGACY`만 허용한다. `PRICE_BOOK`은 예약값이며
-잘못된 enum과 함께 설정 바인딩 단계에서 기동을 거절하므로 ApplicationRunner/backfill이 시작되지 않는다.
-현재 다섯 writer와 전환 전 backfill은 기존 `REPAIR` 계약을 유지한다. `MissingBase.REJECT`는 순수 계획의 미연결 가드로,
-기존 상품·SKU 기준통화 누락을 거절하면서 신규 상품·신규 SKU의 INSERT는 허용한다. 설정만으로 이 가드에 전환하지 않는다.
+`price-source.mode`(`PRICE_SOURCE_MODE`)는 미설정·null·빈값이면 `LEGACY` 다. A 시점에는 `PRICE_BOOK` 을 바인딩 단계에서
+거절했고, B3 부터는 아래 기동 검증 빈이 거절한다. 잘못된 enum 은 여전히 바인딩 단계에서 거절한다. 어느 쪽이든 ApplicationRunner/backfill 이 시작되지 않는다.
+`MissingBase.REJECT`는 순수 계획의 가드로, 기존 상품·SKU 기준통화 누락을 거절하면서 신규 상품·신규 SKU의 INSERT는 허용한다.
+
+### PR-2b-B3 writer 모드 분기
+
+- `LegacyPriceWriteProcessor.prepare`(다섯 writer 공통 진입)는 `price-source.mode` 로 `MissingBase` 를 고른다 — `LEGACY` → `REPAIR`(기존 동작 그대로),
+  `PRICE_BOOK` → `REJECT`(빠진 기준통화 행을 보완하지 않고 고정 내부 오류 · 전체 롤백). writer 호출부는 바뀌지 않는다.
+- 전환 전 backfill 은 새 `prepareBackfill`(모드와 상관없이 `REPAIR`)을 쓴다. 신규 상품 `prepareNew` 는 빠진 행이 없으므로 그대로다.
+- `PriceSourceProperties` 는 `PRICE_BOOK` 을 값으로 받는다(모드 분기를 시험할 수 있게). 운영 기동 거절은 `global.config.PriceSourceModeGuard` 가
+  컨텍스트 초기화 중에 맡는다. 모든 reader 연결(B4~B6)이 끝난 뒤 **B7 에서 이 빈만 지워** 해제한다. 그 전에는 PRICE_BOOK 로 기동할 수 없으므로
+  B3 머지만으로 운영 동작은 바뀌지 않는다.
+- 시험: 모드별 조율기 단위 시험(PRICE_BOOK REJECT · ID 미할당, LEGACY REPAIR, PRICE_BOOK 에서도 backfill REPAIR)과 기존 LEGACY writer 통합 시험.
+  REJECT 예외의 롤백은 같은 `IllegalStateException` 계열인 drift 경로 통합 시험이 보장한다.
 
 B 후속은 모든 고객·internal·admin reader, 목록 정렬·페이지/count·SKU 집계·display/look과 다섯 가격 writer,
 전체 Product 저장 경로를 같은 단일 정본으로 연결하는 작업이다. 동시 읽기 일관성·양방향 writer 경합·실패 rollback·혼합 배포와
