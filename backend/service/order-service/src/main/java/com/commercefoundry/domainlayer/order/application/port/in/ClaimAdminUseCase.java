@@ -24,4 +24,9 @@ public interface ClaimAdminUseCase {
 
     /** 반품 접수를 거절하고 같은 커밋에서 주문을 정리한다 — 환불 · 원격 호출 없음 (#17 B2c-2). */
     ClaimAdminResponse rejectReturn(long claimId, long expectedVersion, String reason, long adminId);
+
+    /**
+     * 결제사가 종결 거절한 결제 후 취소를, payment 가 무환불을 확정한 뒤에만 거절하고 주문을 취소 요청 전 상태로 되돌린다 — 재고 복원 · 환불 없음 (#17 A4).
+     */
+    ClaimAdminResponse rejectCancellation(long claimId, long expectedVersion, String reason, long adminId);
 }

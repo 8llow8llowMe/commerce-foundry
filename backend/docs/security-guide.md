@@ -269,6 +269,7 @@ order-service · payment-service 어드민 엔드포인트 → 권한 (#587):
 | `POST /api/v1/admin/claims/{claimId}/retries` (#17 A2b) | `ORDER_MANAGE` | 200 | 200 | 403 |
 | `POST /api/v1/admin/claims/{claimId}/return-approval` · `POST /api/v1/admin/claims/{claimId}/return-rejection` (#17 B2c-2) | `ORDER_MANAGE` | 200 | 200 | 403 |
 | `POST /api/v1/admin/claims/{claimId}/refund-confirmation` · `POST /api/v1/admin/claims/{claimId}/completion` (#17 A3) | `SETTLEMENT_MANAGE` | 200 | 403 | 403 |
+| `POST /api/v1/admin/claims/{claimId}/cancellation-rejection` (#17 A4) | `SETTLEMENT_MANAGE` | 200 | 403 | 403 |
 | `GET /api/v1/admin/payments` | `SETTLEMENT_READ` | 200 | 403 | 403 |
 
 - 클레임(반품 접수) 조회는 주문 업무라 `ORDER_READ` 다. 결제 목록은 금액 · 결제 수단 · PG 회신을 보는 정산 업무라 `SETTLEMENT_READ` 다.
@@ -278,7 +279,11 @@ order-service · payment-service 어드민 엔드포인트 → 권한 (#587):
   저장된 클레임 아이디 · 결제 · 금액으로 자동 처리(고객 요청 · 재시도 스케줄러와 같은 경로)를 한 번 더 돌릴 뿐이라 MANAGER 에게 연다. 감사는 `CLAIM_RETRY` 다.
   **수동 환불 확정 · 복원 생략 종결(#17 A3)은 `SETTLEMENT_MANAGE`(ADMIN · OWNER — 대표만)** 다 — PG 를 부르지 않고 운영자 판단으로 돈(환불 완료) · 재고(복원 생략)
   기록을 닫으므로 `ORDER_MANAGE` 에 얹지 않는다. MANAGER 는 다시 시도는 되지만 확정 · 종결은 403 이다. 감사는 `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` 다.
-  상세의 `refundConfirmable` · `completable` 은 보는 사람 권한과 무관한 클레임 판정이라 FE 가 역할로 버튼을 한 번 더 거른다. 취소 거절(A4)의 권한은 그 PR 에서 정한다.
+  상세의 `refundConfirmable` · `completable` · `cancellationRejectable` 은 보는 사람 권한과 무관한 클레임 판정이라 FE 가 역할로 버튼을 한 번 더 거른다.
+  **결제 후 취소 거절(#17 A4)도 `SETTLEMENT_MANAGE`(대표만)** 다(사용자 결정 2026-11-28) — 결제사가 환불을 거절한 취소를 끝내고 주문을 다시 출고로 돌리는
+  돈 기록을 닫는 새 결정이고, payment 원장에 되돌릴 수 없는 무환불 봉인(`VOIDED`, `payment-guide.md` §8-1)을 쓴다. 같은 클레임의 다른 출구인 수동 환불 확정도
+  대표 전용이라 같은 권한에 둔다. 반품 거절(`ORDER_MANAGE`)과 권한이 달라 경로를 `return-rejection` 과 나눴다. MANAGER 는 403 이다. 감사는 `CLAIM_CANCELLATION_REJECT`
+  (성공 · 실패, 사유 원문 · payment 판정 결과 제외)다.
   **반품 승인 · 거절(#17 B2c-2)은 `ORDER_MANAGE`** 다 — 검수 결과(귀책 · 재고 되돌림 · 차감액)를 정하는 주문 처리 업무이고, 환불액은 서버가 주문 스냅숏 ·
   결제 기록으로 다시 계산해 화면 금액과 대조하며(다르면 409 `ORDER_046`) 실제 환불은 저장된 결제 · 금액으로 자동 처리 경로가 보낸다. 승인 뒤 막힌 환불의
   수동 확정 · 종결은 여전히 대표만이다. 감사는 `CLAIM_RETURN_APPROVE` · `CLAIM_RETURN_REJECT` 이고 귀책 · 차감액 · 금액 · 사유 원문은 감사 줄에 넣지 않는다
@@ -1419,7 +1424,7 @@ action=MEMBER_SEARCH actorMemberId=4611686018427387904 target=members?role=ALL&p
 | 서비스 | 행위 | 상태 |
 |--------|------|------|
 | auth | `ADMIN_LOGIN` · `ADMIN_LOGIN_PASSWORD_VERIFIED` · `MEMBER_SEARCH` · `ADMIN_SEARCH` · `ADMIN_CREATE` · `ADMIN_DEACTIVATE` · `ADMIN_REACTIVATE` · `ADMIN_ROLE_CHANGE` · `ADMIN_PASSWORD_CHANGE` · `ADMIN_OTP_ENROLL` · `ADMIN_OTP_DISABLE` · `ADMIN_OTP_RECOVERY_REGENERATE` · `ADMIN_OTP_PEER_RECOVERY` | 계정 5개(#236 PR-B1 역할 · 상태 포함)·OTP 4개 선언 완료, OTP 등록 시작 면제(#163) — 기존 Port · 로그 + DB 경로 유지 |
-| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` · `CLAIM_RETRY` · `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` · `CLAIM_RETURN_APPROVE` · `CLAIM_RETURN_REJECT` | 사용 중 — 상태 변경 · 다시 시도(#17 A2b) · 수동 환불 확정 · 복원 생략 종결(#17 A3) · 반품 승인 · 거절(#17 B2c-2 — 승인 SUCCESS 는 결정 커밋 직후라 이어진 환불이 503 `ORDER_036` 이어도 SUCCESS 다. 수동 환불 확정 · 다시 시도는 이어지는 원격 단계(progress) 뒤에 기록해 036 이면 false — 이 차이를 알고 읽는다)(모두 실패도 false) 선언 · `OrderAdminAuditProcessor`와 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출(요청당 한 줄). 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·사유 원문·개인정보는 제외한다. 결정 사유는 클레임 결정 칸에 **마지막 결정만** 남고(확정 뒤 종결하면 덮인다) 결정 누적 원장은 후속 #694 다 (#17) |
+| order | `ORDER_SEARCH` · `ORDER_VIEW` · `ORDER_STATUS_CHANGE` · `CLAIM_SEARCH` · `CLAIM_VIEW` · `CLAIM_RETRY` · `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` · `CLAIM_RETURN_APPROVE` · `CLAIM_RETURN_REJECT` · `CLAIM_CANCELLATION_REJECT` | 사용 중 — 상태 변경 · 다시 시도(#17 A2b) · 수동 환불 확정 · 복원 생략 종결(#17 A3) · 결제 후 취소 거절(#17 A4 — SUCCESS 는 거절 기록 커밋 뒤, payment 무환불 판정 거부 052 · 053 · 054 도 false) · 반품 승인 · 거절(#17 B2c-2 — 승인 SUCCESS 는 결정 커밋 직후라 이어진 환불이 503 `ORDER_036` 이어도 SUCCESS 다. 수동 환불 확정 · 다시 시도는 이어지는 원격 단계(progress) 뒤에 기록해 036 이면 false — 이 차이를 알고 읽는다)(모두 실패도 false) 선언 · `OrderAdminAuditProcessor`와 `ClaimAdminAuditProcessor`의 직접 `AdminAuditLog` 호출(요청당 한 줄). 클레임은 JWT 관리자와 검증된 필터/ID만 기록하며 멱등키·항목·사유 원문·개인정보는 제외한다. 결정 사유는 클레임 결정 칸에 **마지막 결정만** 남고(확정 뒤 종결하면 덮인다) 결정 누적 원장은 후속 #694 다 (#17) |
 | operations | `JOB_CANCEL` · `JOB_RESULT_DOWNLOAD` | 취소 · 다운로드 발급은 `@AdminAudited` · `AdminAuditLog` 사용. 취소는 `JobAdminAuditProcessor` 직접 호출로 통일(#163 PR-E 일부). 알림 읽음(`markRead` · `markAllRead`) · 온보딩 투어 기록(`updateTour` · `updateTourLegacy`)은 본인 상태라 `@AdminAuditExempt` (#163 PR-E) |
 | operations | `CAMPAIGN_RECIPIENT_PREVIEW` | #230 PR-B. ADMIN의 JWT memberId, 고정 target=`campaign-preview:recipients`, 성공·실패 한 줄. 수신자 ID 목록·원격 본문 없음. 검증400·401/403은 업무 미도달로 감사 없음 |
 | operations | `STORE_FOOTER_DRAFT_SAVE` · `STORE_FOOTER_PUBLISH` | #597. SETTINGS_MANAGE의 실제 JWT 관리자, 고정 target=`store-footer:1`, 성공·실패 한 줄. URL·표시명·저작권 문구는 기록하지 않는다. 수정 이력은 푸터 리비전 표가 소유한다 |

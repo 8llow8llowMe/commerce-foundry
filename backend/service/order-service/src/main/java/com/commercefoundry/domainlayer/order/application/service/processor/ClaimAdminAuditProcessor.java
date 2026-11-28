@@ -4,7 +4,7 @@ import com.commercefoundry.domainlayer.order.application.model.ClaimAdminFilter;
 import com.commercefoundry.security.audit.AdminAuditLog;
 import org.springframework.stereotype.Component;
 
-/** 어드민 클레임 조회 (#17). */
+/** 어드민 클레임 조회 · 수습 · 결정 감사 (#17). */
 @Component
 public class ClaimAdminAuditProcessor {
     public void searched(long adminId, ClaimAdminFilter filter) {
@@ -48,5 +48,13 @@ public class ClaimAdminAuditProcessor {
     /** 반품 거절 (#17 B2c-2) — 실패도 false. 사유 원문은 감사 줄에 넣지 않는다(클레임 결정 칸과, 주문이 바뀌었으면 주문 이력에 남는다). */
     public void returnRejected(long adminId, long claimId, boolean success) {
         AdminAuditLog.write("CLAIM_RETURN_REJECT", adminId, AdminAuditLog.target("claim", claimId), success);
+    }
+
+    /**
+     * 결제 후 취소 거절 (#17 A4) — 실패(409 · 503 · 404, payment 무환불 판정 거부 포함)도 false. 성공은 거절이 커밋됐다는 뜻이다. 사유 원문은 감사 줄에 넣지 않는다
+     * (클레임 결정 칸과 주문 이력에 남는다). payment 판정 결과 · 사유 코드도 넣지 않는다(로그에 남는다).
+     */
+    public void cancellationRejected(long adminId, long claimId, boolean success) {
+        AdminAuditLog.write("CLAIM_CANCELLATION_REJECT", adminId, AdminAuditLog.target("claim", claimId), success);
     }
 }

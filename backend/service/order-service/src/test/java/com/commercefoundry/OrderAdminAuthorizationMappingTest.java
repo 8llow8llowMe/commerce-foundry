@@ -47,7 +47,9 @@ class OrderAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/claims/{claimId}/return-rejection", AdminAuthority.ORDER_MANAGE),
         // 수동 환불 확정 · 복원 생략 종결(#17 A3) — PG 를 부르지 않고 돈 · 재고 기록을 운영자 판단으로 닫는다. 대표만(SETTLEMENT_MANAGE)
         Map.entry("POST /api/v1/admin/claims/{claimId}/refund-confirmation", AdminAuthority.SETTLEMENT_MANAGE),
-        Map.entry("POST /api/v1/admin/claims/{claimId}/completion", AdminAuthority.SETTLEMENT_MANAGE)
+        Map.entry("POST /api/v1/admin/claims/{claimId}/completion", AdminAuthority.SETTLEMENT_MANAGE),
+        // 결제 후 취소 거절(#17 A4) — 돈 기록을 닫는 새 결정이고 payment 원장에 되돌릴 수 없는 무환불 봉인을 쓴다. 같은 클레임의 환불 확정과 같이 대표만
+        Map.entry("POST /api/v1/admin/claims/{claimId}/cancellation-rejection", AdminAuthority.SETTLEMENT_MANAGE)
     );
 
     @Autowired

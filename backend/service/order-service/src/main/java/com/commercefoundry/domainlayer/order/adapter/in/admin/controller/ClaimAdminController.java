@@ -35,7 +35,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "[어드민] 클레임", description = "반품 · 결제 후 취소 클레임 목록 · 상세 조회, 반품 승인 · 거절, 다시 시도 · 수동 환불 확정 · 복원 생략 종결")
+@Tag(name = "[어드민] 클레임", description = "반품 · 결제 후 취소 클레임 목록 · 상세 조회, 반품 승인 · 거절, 다시 시도 · 수동 환불 확정 · 복원 생략 종결 · 결제 후 취소 거절")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor
@@ -157,5 +157,24 @@ public class ClaimAdminController {
         @RequestBody @Valid ClaimDecisionRequest request
     ) {
         return ResponseEntity.ok(Response.success(useCase.rejectReturn(claimId, request.expectedVersion(), request.reason(), admin.memberId())));
+    }
+
+    @Operation(summary = "결제 후 취소 거절", description = "결제사가 환불을 거절해 멈춘 결제 후 취소를 거절(끝)하고 주문을 취소 요청 전 상태(결제 완료 · 제작 중 · 상품 준비중)로 "
+        + "되돌린 뒤 현재 상세를 준다. 누르면 결제사에 이 취소의 환불이 없었는지 한 번 확인하고, 없었음이 확인된 경우에만 거절한다. 환불 · 재고 복원은 하지 않는다. "
+        + "주문 이력에 사유가 남고 고객에게는 상태 '거절' 만 보인다(사유 · 알림 없음). 대표 관리자만(SETTLEMENT_MANAGE). 본문 {expectedVersion, reason}. "
+        + "상세의 recovery.cancellationRejectable 이 true 인 접수만 대상이다. "
+        + "버전 불일치 · 동시 변경(같은 주문 잠금 경합 포함) 409(ORDER_037), 거절할 수 없는 접수(결제사 거절이 아님 · 결과 미확인 · 자동 처리 중 · 주문이 취소 요청이 아님 · "
+        + "같은 주문의 다른 취소 진행 중 · 결제 기록 불일치 · 되돌릴 상태를 확인할 수 없음) 409(ORDER_041), 결제사에서 이미 환불됨 409(ORDER_052 — 환불 완료로 확정), "
+        + "결제사에서 환불 없음을 확인하지 못함 409(ORDER_053), 결제사 확인 불가 503(ORDER_054), 없는 접수 404(ORDER_032), "
+        + "본문 검증 400(ORDER_169 · 170 · 148 · 151), 양수가 아닌 아이디 400(ORDER_166).")
+    @PreAuthorize(AdminAuthority.SETTLEMENT_MANAGE)
+    @AdminAudited(action = "CLAIM_CANCELLATION_REJECT")
+    @PostMapping("/{claimId}/cancellation-rejection")
+    public ResponseEntity<Response<ClaimAdminResponse>> rejectCancellation(
+        @AuthenticationPrincipal MemberPrincipal admin,
+        @Parameter(description = "클레임 아이디") @PathVariable @Positive(message = OrderValidationMessage.CLAIM_ID_POSITIVE) long claimId,
+        @RequestBody @Valid ClaimDecisionRequest request
+    ) {
+        return ResponseEntity.ok(Response.success(useCase.rejectCancellation(claimId, request.expectedVersion(), request.reason(), admin.memberId())));
     }
 }

@@ -978,6 +978,16 @@ tx2 는 결제 행을 다시 잠그고 스냅숏(이 claimId 행 상태 · 두 �
 - **재호출 멱등** — 같은 claimId 로 다시 부르면 `VOIDED` 가 있어도 매번 PG 를 다시 대조하고 그때의 판정을 답한다. `VOIDED` 뒤 PG 가 `MATCHED` 가 아니면
   `UNCONFIRMED`(`PG_LEDGER_MISMATCH` · `PG_UNAVAILABLE` · `PG_CHECK_UNSUPPORTED`) · `sealed=true` 로 답하고 `VOIDED` 행은 그대로 둔다.
 - **재호출 상한** — order 의 void 재호출은 백오프 · 상한을 둔다. 어드민 동작 1회당 1회이며 자동 재시도 루프를 만들지 않는다 — 이 조회는 승인과 같은 `toss` 서킷을 쓴다.
+  - **order 쪽 구현 (#17 A4 PR-2)** — 대표의 취소 거절 `POST /api/v1/admin/claims/{claimId}/cancellation-rejection` 한 번이 void 한 번이다. 부르는 곳은
+    `ClaimCancellationVoidProcessor` 하나뿐이고(트랜잭션 밖 `NEVER`, ArchUnit 시험으로 고정), order 자격 확인(tx1)을 통과한 클레임에만 부른다 — 결과 미확인
+    (`REFUND_UNCONFIRMED`) 클레임은 부르지 않아 봉인으로 다시 시도 경로가 막히지 않는다. 어드민 상세 · 재시도 스케줄러 · 고객 요청은 부르지 않고, 다시 부르는 것은
+    운영자가 다시 누를 때뿐이다(자동 재시도 없음). 위 "백오프 · 상한" 은 order 의 전용 서킷 `payment-cancellation-void`(환불 실행 `payment-cancellation` 과 분리,
+    연속 3회 실패면 60초 열림)가 맡는다 — 열린 동안 거절은 503 `ORDER_054` 로 막히고 payment 를 부르지 않는다. 대표만 누르는 동작이라 연타 제한은 따로 두지 않는다.
+    order 는 `outcome` 만 보고(`REFUNDED` 409 `ORDER_052` · `UNCONFIRMED` 409 `ORDER_053` · `UNAVAILABLE` · 호출 예외 503 `ORDER_054`), `reason` 은 로그에만 남긴다.
+    응답의 `sealed` 는 order 포트 결과에 싣지 않아 "미확정 + 봉인" 막다른 상태(아래 표)를 order 가 따로 알리지 않는다 — #693 몫이다.
+    봉인 뒤 order 의 거절 기록(tx2)이 지면(주문 잠금 · 낙관락 409 `ORDER_037`) payment 는 봉인됐고 order 는 환불 실패 그대로다. 상세를 다시 읽어 다시 거절하면
+    같은 판정(`NO_REFUND_CONFIRMED`)을 다시 받아 끝난다(order warn 로그: 결제 · 클레임 아이디). 그 사이 다른 대표가 환불 완료로 확정했다면 `VOIDED` 와 order
+    `REFUNDED` 가 갈라져 #693 탈출 경로로 맞춘다.
 - **경합** — void 와 같은 클레임의 결제 후 취소 준비가 겹치면 결과는 둘 중 하나다: `VOIDED` + 준비 016, 또는 `PENDING` + void `UNCONFIRMED`(`CLAIM_REFUND_PENDING` · `LEDGER_CHANGED`).
   같은 클레임의 void 둘이 겹치면 둘 다 `NO_REFUND_CONFIRMED` 이고 `VOIDED` 행은 하나다. 모두 결제 행 잠금으로 줄을 선다(`PaymentCancelVoidContract`).
 - **PENDING 14일 막다른 길** — 생성 14일이 지난 `PENDING` 은 PG 재전송을 막으므로(§8 #16 PR-2) void 도 영영 `CLAIM_REFUND_PENDING` 이다. 출구는 수동 확정(#693)이다 —

@@ -22,7 +22,11 @@ public record ClaimAdminRecoveryItem(
     @Schema(description = "지금 '재고 복원 없이 종결' 을 할 수 있는 접수인가 (SETTLEMENT_MANAGE — 대표만). 주문 전 수량 취소면 주문이 취소 완료인지는 실행 때 본다")
     boolean completable,
 
-    @Schema(description = "마지막 운영자 결정(수동 환불 확정 · 복원 생략 종결). 없으면 null", nullable = true)
+    @Schema(description = "지금 '취소 거절' 을 할 수 있는 접수인가 (SETTLEMENT_MANAGE — 대표만). 결제사가 환불을 거절한 결제 후 취소만 true 다. "
+        + "주문 상태 · 결제사의 환불 없음 확인은 실행 때 본다")
+    boolean cancellationRejectable,
+
+    @Schema(description = "마지막 운영자 결정(수동 환불 확정 · 복원 생략 종결 · 거절). 없으면 null", nullable = true)
     DecisionItem lastDecision,
 
     @Schema(description = "화면 버전 — 다시 시도 · 결정 요청의 expectedVersion 으로 그대로 보낸다", example = "3")
