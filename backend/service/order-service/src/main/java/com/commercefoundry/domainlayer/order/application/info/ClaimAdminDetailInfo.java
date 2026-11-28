@@ -45,7 +45,7 @@ public record ClaimAdminDetailInfo(
 
     /**
      * @param nextAutomaticAttemptAt 자동 처리가 다시 확인할 시각. 대기 상태가 아니면 null
-     * @param completable 복원 생략 종결 후보(A3) — 주문이 취소 완료인지는 실행 때 본다
+     * @param completable 복원 생략 종결 후보(A3) — 주문 전 수량 취소면 주문이 취소 완료인지는 실행 때 본다
      * @param lastDecision 마지막 운영자 결정(수동 환불 확정 · 복원 생략 종결). 없으면 null
      * @param version 다시 시도 · 결정 요청의 {@code expectedVersion} 으로 그대로 보내는 화면 버전
      */

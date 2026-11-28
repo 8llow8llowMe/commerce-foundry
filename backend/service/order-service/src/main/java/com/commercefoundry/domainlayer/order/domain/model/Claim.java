@@ -549,7 +549,11 @@ public record Claim(
      * 반품 환불이 같은 결제의 다른 환불에 막혀 나가지 않았을 수 있는가 (#17 B2b) — 반품은 한 결제에 클레임이 여럿이라, 다른 claimId 의 결제 취소가 아직
      * 처리 중(payment 원장 PENDING)이면 payment 는 이 클레임의 행을 만들지 않고 {@code PAYMENT_016} 을 준다(일시적 겹침). order 는 payment 원장을 읽지 못해
      * 겹침과 이 클레임 자체의 거절을 가르지 못하므로, 돈이 나가지 않았다고 보고 <b>다시 시도</b>(같은 claimId — 겹침이 풀리면 환불, 진짜 거절이면 다시 016 이라 무해)를
-     * 정본 경로로 둔다. 수동 환불 확정은 결제 취소 키 기한이 닫힌 뒤에만 받는다(결과 미확인과 같다). 취소 클레임의 016 은 그대로 거절이다(주문당 하나).
+     * 정본 경로로 둔다. 수동 환불 확정은 결제 취소 키 기한이 닫힌 뒤에만 받는다(결과 미확인과 같다).
+     *
+     * <p>취소 클레임의 016 은 지금 그대로 거절로 분류한다. 전에는 "결제 후 취소는 주문당 하나라 겹침이 없다"가 근거였지만 부분 취소(#684)부터는 한 주문 · 한 결제에
+     * 취소 클레임이 여럿이라 이 전제가 맞지 않는다 — 앞 부분 취소의 payment 원장이 PENDING 으로 남으면(수동 확정 등) 다음 취소의 016 도 겹침일 수 있다.
+     * 취소의 016 을 막힘으로 볼지는 고객 부분 취소 API(#684 PR-4)의 머지 조건이다({@code order-flow-guide.md} §1-4 "알려진 한계"). 동작은 아직 바꾸지 않았다.
      */
     public boolean isRefundWaiting() {
         return type == Type.RETURN && status == Status.REFUND_FAILED && REFUND_BLOCKED_CODE.equals(failureCode);
@@ -568,7 +572,7 @@ public record Claim(
 
     /**
      * 운영자 복원 생략 종결 (#17 A3) — 재고 복원이 종결 실패한 클레임을 복원 없이 COMPLETED 로 닫는다. 재고는 운영자가 재고 조정으로 먼저 맞춘다.
-     * 종결 자격(주문 취소 완료 · 확정 실패 코드)은 {@link ClaimAdminRecoveryPolicy#requireCompletion} 이 먼저 본다.
+     * 종결 자격(확정 실패 코드 · 주문 전 수량 취소면 주문 취소 완료)은 {@link ClaimAdminRecoveryPolicy#requireCompletion} 이 먼저 본다.
      */
     public Claim completeByAdmin(Decision decision) {
         requireDecisionOn(Status.RESTORATION_FAILED, decision);

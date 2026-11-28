@@ -247,6 +247,7 @@ public record Order(
     /**
      * 결제 후 고객 취소 요청 (#16 PR-2) — 결제 완료 · 제작 중 · 상품 준비중이면 취소 요청(CANCEL_REQUESTED)으로 바꾼다. 환불 · 재고 복원은 클레임이 이어 간다.
      * 이미 취소 요청 · 취소 완료면 바꾸지 않은 이 값을 돌려준다(더블클릭 · 재시도). 제작 중 허용 여부는 부르는 쪽이 {@link #isCancelableByCustomer(boolean)} 로 먼저 본다.
+     * 환불이 확정되면 {@link #settleCancellation} 이 취소 완료 · 결제 완료로 정리한다.
      *
      * @throws OrderStatusTransitionException 그 밖의 상태(결제 대기 · 만료 · 배송 중 이후 등) · 저장 전 주문
      */
@@ -261,28 +262,14 @@ public record Order(
     }
 
     /**
-     * 결제 후 취소 완료 (#16 PR-2) — 환불이 확정된 취소 요청을 취소 완료(CANCELED)로 바꾼다. 이미 취소 완료면 바꾸지 않은 이 값을 돌려준다(확정 반영 재시도).
-     *
-     * @throws OrderStatusTransitionException 취소 요청 · 취소 완료가 아닌 상태 · 저장 전 주문
-     */
-    public Order completeCancellation() {
-        if (status == OrderStatus.CANCELED) {
-            return this;
-        }
-        if (isNew() || status != OrderStatus.CANCEL_REQUESTED) {
-            throw new OrderStatusTransitionException(status, OrderStatus.CANCELED);
-        }
-        return transitionTo(OrderStatus.CANCELED);
-    }
-
-    /**
      * 취소 정리 (#684) — 취소 요청 주문을 {@link CancellationRefundPolicy#outcome} 이 판정한 상태로 바꾼다. 환불이 기록된 취소 수량이 모든 주문 수량이면 취소 완료,
      * 열린 취소 없이 일부만이면 결제 완료로 돌아가고(부분 취소 — 남은 수량을 출고한다), 열린 취소가 남았으면 취소 요청에 머문다. 이미 그 상태면 바꾸지 않은 이 값을
-     * 돌려준다 — {@link #completeCancellation()} 과 같이 확정 반영 재시도가 안전하다. 목표는 정책 결과로만 받는다 — 주문은 클레임을 읽지 않는다.
+     * 돌려준다 — 확정 반영 재시도가 안전하다. 목표는 정책 결과로만 받는다 — 주문은 클레임을 읽지 않는다.
      *
-     * <p>취소 요청 → 결제 완료 전이는 이 메서드와 취소 거절({@link #rejectCancellation}, #17 A4)만 한다 — {@link #changeStatus} 는 거절하고,
-     * 어드민 직접 전이({@link AdminStatusChangePolicy})에도 없다.
-     * 지금은 부르는 곳이 없다 — 결제 후 취소 엔진(#684 PR-2)이 {@link #completeCancellation()} 대신 부른다.
+     * <p>결제 후 취소의 환불 확정 뒤 취소 요청 → 취소 완료 · 결제 완료 전이는 이 메서드만 한다(#684 PR-2 — 전에 쓰던 무판정 취소 완료 전이는 없앴다).
+     * 환불 없는 되돌림(취소 요청 → 결제 완료 · 제작 중 · 상품 준비중)은 취소 거절({@link #rejectCancellation}, #17 A4)이다. {@link #changeStatus} 는
+     * 취소 요청 → 결제 완료를 거절하고, 어드민 직접 전이({@link AdminStatusChangePolicy})에도 없다. 부르는 곳은 환불이 기록되는 전이(자동 환불 확정 반영 ·
+     * 운영자 수동 환불 확정)뿐이다 — 복원 단계에서 부르면 정리 뒤 상품 준비중으로 간 주문에 전이 예외다.
      *
      * @throws OrderStatusTransitionException 취소 요청이 아닌 상태에서의 전이 · 저장 전 주문
      */

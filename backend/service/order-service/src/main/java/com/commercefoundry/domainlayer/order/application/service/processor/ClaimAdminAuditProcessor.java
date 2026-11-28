@@ -26,7 +26,7 @@ public class ClaimAdminAuditProcessor {
 
     /**
      * 수동 환불 확정 (#17 A3) — 실패도 false. 사유 원문은 감사 줄에 넣지 않는다. 사유는 클레임 결정 칸에 <b>마지막 결정만</b> 남고(뒤의 종결이 덮는다),
-     * 확정이 주문을 취소 완료로 바꾼 경우에만 주문 이력에도 남는다. 결정 누적 원장은 후속 #694 다.
+     * 확정이 주문 상태를 바꾼 경우(취소 완료 · 부분 취소 정리의 결제 완료 · 반품 정리)에만 주문 이력에도 남는다. 결정 누적 원장은 후속 #694 다.
      */
     public void refundConfirmed(long adminId, long claimId, boolean success) {
         AdminAuditLog.write("CLAIM_REFUND_CONFIRM", adminId, AdminAuditLog.target("claim", claimId), success);

@@ -19,7 +19,7 @@ public record OrderStatusHistory(
     public static final String DELIVERY_COMPLETED = "DELIVERY_COMPLETED";
     /** 결제 승인이 반영됐다 — 결제 대기 · 만료 → 결제 완료 (#308, payment-service 의 {@code payment-approved} 이벤트 + 재조회). {@link #changedByService} 로 남긴다. */
     public static final String PAYMENT_APPROVED = "PAYMENT_APPROVED";
-    /** 결제 후 취소의 환불이 확정됐다 — 취소 요청 → 취소 완료 (#16 PR-2). {@link #cancellationRefunded} 로 남긴다. */
+    /** 결제 후 취소의 환불이 확정돼 모든 수량이 취소됐다 — 취소 요청 → 취소 완료 (#16 PR-2). {@link #cancellationSettled} 로 남긴다. */
     public static final String CANCELLATION_REFUNDED = "CANCELLATION_REFUNDED";
     /**
      * 결제 후 부분 취소의 환불이 확정돼 남은 수량으로 돌아갔다 — 취소 요청 → 결제 완료 (#684, {@link Order#settleCancellation}). 주체 {@code SERVICE},
@@ -124,19 +124,10 @@ public record OrderStatusHistory(
     }
 
     /**
-     * 결제 후 취소의 환불이 확정됐다 — CANCEL_REQUESTED → CANCELED, 주체 {@code SERVICE}, 사유 {@link #CANCELLATION_REFUNDED} (#16 PR-2).
-     * 환불 호출은 고객 요청 · 재시도 스케줄러 어느 쪽이든 order-service 가 payment-service 에 한다. {@code order} 는 전이 전 주문이다.
-     */
-    public static OrderStatusHistory cancellationRefunded(long id, Order order) {
-        if (order.isNew() || order.status() != OrderStatus.CANCEL_REQUESTED) {
-            throw new IllegalArgumentException("환불 완료 이력은 저장된 취소 요청 주문에서만 만듭니다: orderId=" + order.id() + ", status=" + order.status());
-        }
-        return new OrderStatusHistory(id, order.id(), OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELED, StatusChangedBy.SERVICE, null, CANCELLATION_REFUNDED);
-    }
-
-    /**
      * 취소 정리가 상태를 바꿨다 (#684, {@link Order#settleCancellation}) — 주체 {@code SERVICE}. 취소 완료로 가면 {@link #CANCELLATION_REFUNDED}, 결제 완료로 돌아가면
      * {@link #PARTIAL_CANCELLATION_REFUNDED} 다. {@code before} 는 전이 전(취소 요청), {@code after} 는 전이 뒤 주문이다 — 상태가 그대로인 재시도는 이력을 남기지 않는다.
+     * 환불 호출은 고객 요청 · 재시도 스케줄러 · 운영자 다시 시도 어느 쪽이든 order-service 가 payment-service 에 한다. 운영자 수동 환불 확정은
+     * {@link #changedByAdmin}(사유)이다.
      *
      * @throws IllegalArgumentException 저장된 같은 주문의 취소 요청 → 취소 완료 · 결제 완료가 아닐 때
      */

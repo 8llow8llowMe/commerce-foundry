@@ -75,7 +75,7 @@ public class ClaimAdminFacade implements ClaimAdminUseCase {
     }
 
     /**
-     * 수동 환불 확정(tx: 클레임 REFUNDED + 주문 취소 완료 + ADMIN 이력) → 재고 복원(원격) → 결과 반영(tx) (#17 A3). PG 는 부르지 않는다.
+     * 수동 환불 확정(tx: 클레임 REFUNDED + 주문 정리 + ADMIN 이력) → 재고 복원(원격) → 결과 반영(tx) (#17 A3). PG 는 부르지 않는다.
      * 확정이 커밋되면 성공이다 — 복원이 끊기면 다시 시도와 같이 미확정 한 번으로 세고(클레임은 REFUNDED + lease) 스케줄러가 잇는다.
      * 버전 대조 · 저장 경합은 {@link ClaimAdminRecoveryProcessor} 가 409 로 바꾼다(저장은 flush 까지 하므로 커밋 때 새 충돌은 없다).
      */

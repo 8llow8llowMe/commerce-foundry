@@ -16,6 +16,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCod
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.model.CancellationStepOutcome;
 import com.commercefoundry.domainlayer.order.application.port.out.*;
+import com.commercefoundry.domainlayer.order.application.service.processor.ClaimAdminRecoveryProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationPipelineProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderCancellationProcessor;
 import com.commercefoundry.domainlayer.order.domain.model.*;
@@ -34,6 +35,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import org.junit.jupiter.api.*;
@@ -84,6 +86,8 @@ class CancellationRefundRecoveryPostgresTest {
     @Autowired PlatformTransactionManager transactions;
     @Autowired JdbcTemplate jdbc;
     @Autowired EntityManager entityManager;
+    @Autowired OrderPaymentRepositoryPort payments;
+    @Autowired ClaimAdminRecoveryProcessor recovery;
     @MockitoSpyBean ClaimRepositoryAdapter adapter;
     @MockitoSpyBean OrderCancellationProcessor processor;
     private final AtomicInteger conflicts = new AtomicInteger();
@@ -309,6 +313,99 @@ class CancellationRefundRecoveryPostgresTest {
             source.attemptCount(), source.nextAttemptAt(), source.failureCode(), source.items(), source.requestedAt(), source.version());
         assertThatThrownBy(() -> processor.recordConfirmedRefundWithLock(changed)).isInstanceOf(IllegalStateException.class);
         assertThat(read(source).status()).isEqualTo(Claim.Status.REQUESTED);
+    }
+
+    // ---- #684 PR-2 — tx2 · 수동 확정의 주문 NOWAIT 잠금, 부분 취소 뒤 남은 수량 전체 취소 ----
+
+    @Test
+    void refundRecordingThatLosesOrderLockIs503AndSameClaimCompletesAfterUnlock() throws Exception {
+        Claim source = seed(); entered = new CountDownLatch(1); release = new CountDownLatch(1);
+        CountDownLatch locked = new CountDownLatch(1), unlock = new CountDownLatch(1);
+        Future<Claim> work = THREADS.submit(() -> pipeline.progress(source));
+        Future<?> locker = null;
+        try {
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+            // 환불 응답을 기다리는 동안 다른 TX 가 주문 행을 쥔다 — tx2 의 주문 NOWAIT 잠금이 진다
+            locker = THREADS.submit(() -> tx().executeWithoutResult(status -> {
+                orders.findByIdAndMemberIdForUpdate(source.orderId(), 7).orElseThrow();
+                locked.countDown(); await(unlock);
+            }));
+            await(locked);
+        } finally { release.countDown(); }
+        try {
+            OrderException failure = assertUnavailable(() -> {
+                try { work.get(15, TimeUnit.SECONDS); } catch (ExecutionException wrapped) { throw wrapped.getCause(); }
+            });
+            Throwable cause = failure;
+            while (cause != null && !(cause instanceof java.sql.SQLException)) { cause = cause.getCause(); }
+            assertThat(cause).isInstanceOfSatisfying(java.sql.SQLException.class, sql -> assertThat(sql.getSQLState()).isEqualTo("55P03"));
+            assertThat(read(source).status()).isEqualTo(Claim.Status.REQUESTED);
+            assertThat(orders.findById(source.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        } finally { unlock.countDown(); if (locker != null) { locker.get(10, TimeUnit.SECONDS); } }
+        assertThat(RESTORES).hasValue(0);
+        // 잠금이 풀린 뒤 같은 클레임으로 다시 보낸다 — payment 는 같은 claimId 의 성공을 기억하고 있다
+        assertThat(pipeline.progress(read(source)).status()).isEqualTo(Claim.Status.COMPLETED);
+        assertThat(orders.findById(source.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(SUCCEEDED).hasSize(1);
+        assertThat(REQUESTS.stream().filter(request -> !request.startsWith("restore|")).distinct()).hasSize(1);
+        assertThat(RESTORES).hasValue(1);
+    }
+
+    @Test
+    void fullCancellationAfterSettledPartialRefundsOnlyRemainderAndCancels() {
+        long id = IDS.incrementAndGet();
+        // A 40,000 × 1 · B 10,000 × 2 = 60,000 무료배송. A 부분 취소 37,000(남은 B 20,000 에 배송비 3,000 재부과) 뒤 전체 취소는 B × 2 · 23,000 이다
+        Order placed = Order.place(id, 7, domesticQuote(quoteLine(101, 40_000, 1), quoteLine(102, 10_000, 2)), IDS::incrementAndGet, address("KR"),
+            IDS.incrementAndGet(), NOW);
+        tx().executeWithoutResult(status -> {
+            orders.insert(placed, OrderStatusHistory.created(IDS.incrementAndGet(), placed));
+            jdbc.update("update orders.orders set status='PAID', version=version+1 where id=?", id);
+            entityManager.clear();
+            Order paid = orders.findById(id).orElseThrow();
+            payments.insert(OrderPayment.paid(IDS.incrementAndGet(), paid, 77, paid.quote().totalAmount(), NOW, UUID.randomUUID()));
+            Claim partial = claims.insert(Claim.requestCancellation(IDS.incrementAndGet(), paid, UUID.randomUUID(), Map.of(paid.itemIds().get(0), 1), 77,
+                krw(37_000), OrderCancelReason.OTHER, IDS::incrementAndGet, NOW, Duration.ofMinutes(2)));
+            claims.update(claims.update(partial.markRefunded(NOW)).complete());
+        });
+
+        Claim remainder = processor.request(7, id, OrderCancelReason.OTHER).claim();
+        Claim progressed = pipeline.progress(remainder);
+
+        assertThat(remainder.expectedRefund()).isEqualTo(krw(23_000));
+        assertThat(remainder.requestKey()).isEqualTo(Claim.cancellationRequestKey(id));
+        assertThat(progressed.status()).isEqualTo(Claim.Status.COMPLETED);
+        assertThat(orders.findById(id).orElseThrow().status()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(REQUESTS.stream().filter(request -> !request.startsWith("restore|")).toList()).singleElement()
+            .satisfies(request -> assertThat(JSON.readTree(request.substring(request.lastIndexOf('|') + 1)).path("amount").asLong()).isEqualTo(23_000));
+        String restore = REQUESTS.stream().filter(request -> request.startsWith("restore|")).findFirst().orElseThrow();
+        var items = JSON.readTree(restore.substring("restore|".length())).path("items");
+        assertThat(items.size()).isEqualTo(1);
+        assertThat(items.get(0).path("skuId").asText()).isEqualTo("102");
+        assertThat(items.get(0).path("quantity").asInt()).isEqualTo(2);
+    }
+
+    @Test
+    void adminRefundConfirmationThatLosesOrderLockIs409AndSucceedsAfterUnlock() throws Exception {
+        Claim source = seed();
+        Claim failed = tx().execute(status -> claims.update(source.failRefund("PAYMENT_019")));
+        CountDownLatch locked = new CountDownLatch(1), unlock = new CountDownLatch(1);
+        Future<?> locker = THREADS.submit(() -> tx().executeWithoutResult(status -> {
+            orders.findByIdAndMemberIdForUpdate(source.orderId(), 7).orElseThrow();
+            locked.countDown(); await(unlock);
+        }));
+        try {
+            await(locked);
+            assertThatThrownBy(() -> recovery.confirmRefund(failed.id(), failed.version(), "결제 관리 화면에서 취소 완료 확인", 9))
+                .isInstanceOfSatisfying(OrderException.class, error -> assertThat(error.getErrorCode()).isEqualTo(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED));
+        } finally { unlock.countDown(); locker.get(10, TimeUnit.SECONDS); }
+        Claim unchanged = read(source);
+        assertThat(unchanged.status()).isEqualTo(Claim.Status.REFUND_FAILED);
+        assertThat(unchanged.version()).isEqualTo(failed.version());
+        assertThat(unchanged.decision()).isNull();
+        assertThat(orders.findById(source.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        // 잠금이 풀린 뒤 같은 화면 버전으로 다시 확정하면 취소 완료다
+        assertThat(recovery.confirmRefund(failed.id(), failed.version(), "결제 관리 화면에서 취소 완료 확인", 9).status()).isEqualTo(Claim.Status.REFUNDED);
+        assertThat(orders.findById(source.orderId()).orElseThrow().status()).isEqualTo(OrderStatus.CANCELED);
     }
 
     private static OrderException assertUnavailable(org.assertj.core.api.ThrowableAssert.ThrowingCallable action) {

@@ -3,6 +3,7 @@ package com.commercefoundry.domainlayer.order.domain.model;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.shared.commerce.ShippingScope;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +84,83 @@ public final class CancellationRefundPolicy {
         Due dueAfter = dueOf(quote, after);
         long delta = Math.subtractExact(dueAfter.shipping(), dueBefore.shipping());
         return new RefundBreakdown(Math.subtractExact(dueBefore.items(), dueAfter.items()), Math.max(0, -delta), Math.max(0, delta), quote.currency());
+    }
+
+    /**
+     * 남은 수량 전부를 취소하는 전체 취소 (#684 PR-2) — 거절 밖 취소 클레임({@link Claim#reservesCancellationQuantity()})에 잡히지 않은 주문 수량 전부와 그 환불액
+     * {@code due(before)} 다. 선행 취소가 없으면 전 항목 · 전 수량 · 결제 총액({@link #fullRefund})과 같다. 정산된 취소의 환불 합도 함께 낸다 — 부르는 쪽이
+     * {@code 정산된 취소 환불 합 + 이번 환불 = 결제 금액} 으로 결제 기록과 대조한다.
+     *
+     * <p>데이터 이상은 계산하지 않는다(부르는 쪽이 접수하지 않는다) — 열린 취소가 있음(주문당 열린 취소는 하나이고 그동안 주문은 취소 요청이라 전체 취소 접수에
+     * 오지 않는다), 취소에 잡힌 수량이 주문 수량을 넘음, 주문에 없는 항목, 남은 수량이 없음, 주문과 다른 통화의 환불액.
+     *
+     * @param claims 이 주문의 클레임 전부 — 주문 잠금 뒤 읽은 것
+     * @throws IllegalArgumentException 다른 주문의 클레임
+     * @throws IllegalStateException 위 데이터 이상
+     */
+    public static RemainingCancellation remaining(Order order, List<Claim> claims) {
+        Objects.requireNonNull(order, "order");
+        Objects.requireNonNull(claims, "claims");
+        CurrencyCode currency = order.quote().currency();
+        Map<Long, Integer> canceled = new HashMap<>();
+        long settledRefund = 0;
+        for (Claim claim : claims) {
+            if (claim.orderId() != order.id()) {
+                throw new IllegalArgumentException("다른 주문의 클레임입니다: claimId=" + claim.id());
+            }
+            if (!claim.reservesCancellationQuantity()) {
+                continue;
+            }
+            if (claim.isOpenCancellation()) {
+                throw new IllegalStateException("열린 취소가 있는 주문은 전체 취소를 접수하지 않습니다: claimId=" + claim.id());
+            }
+            if (claim.expectedRefund().currency() != currency) {
+                throw new IllegalStateException("주문과 다른 통화의 취소 환불입니다: claimId=" + claim.id());
+            }
+            settledRefund = Math.addExact(settledRefund, claim.expectedRefund().amount());
+            for (ClaimItem item : claim.items()) {
+                if (!order.itemIds().contains(item.orderItemId())) {
+                    throw new IllegalStateException("주문에 없는 항목의 취소입니다: claimId=%d, orderItemId=%d".formatted(claim.id(), item.orderItemId()));
+                }
+                canceled.merge(item.orderItemId(), item.quantity(), Math::addExact);
+            }
+        }
+        Map<Long, Integer> remaining = new HashMap<>();
+        for (int index = 0; index < order.itemIds().size(); index++) {
+            long itemId = order.itemIds().get(index);
+            int left = order.quote().lines().get(index).quantity() - canceled.getOrDefault(itemId, 0);
+            if (left < 0) {
+                throw new IllegalStateException("취소에 잡힌 수량이 주문 수량을 넘습니다: orderItemId=" + itemId);
+            }
+            if (left > 0) {
+                remaining.put(itemId, left);
+            }
+        }
+        if (remaining.isEmpty()) {
+            throw new IllegalStateException("취소할 남은 수량이 없습니다: orderId=" + order.id());
+        }
+        Refund refund = breakdown(order, canceled, remaining).toRefund();
+        if (!refund.isPayable()) {
+            throw new IllegalStateException("남은 수량의 환불액이 0 이하입니다: orderId=" + order.id());
+        }
+        return new RemainingCancellation(remaining, refund.toMoney(), Money.of(settledRefund, currency));
+    }
+
+    /**
+     * 환불이 기록되는 전이의 취소 정리 판정 (#684 PR-2) — 판정 입력은 주문 잠금 뒤 읽은 클레임 목록({@code stored})에서 이번 클레임을 빼고 그 갱신 결과
+     * ({@code recorded}, 환불 완료)를 넣은 것이다. 갱신 전 목록으로 판정하면 이번 클레임이 열린 취소로 보여 {@link CancellationOutcome#STILL_REQUESTED} 가 나오고,
+     * 열린 취소 없이 취소 요청에 멈춘 주문이 생긴다. 예외는 {@link #outcome(Order, List)} 와 같다.
+     *
+     * @param stored 이 주문의 클레임 전부 — 주문 잠금 뒤 읽은 것(이번 클레임은 갱신 전 값이어도 된다)
+     * @param recorded 이번 클레임의 갱신 결과
+     */
+    public static CancellationOutcome outcome(Order order, List<Claim> stored, Claim recorded) {
+        Objects.requireNonNull(stored, "stored");
+        Objects.requireNonNull(recorded, "recorded");
+        List<Claim> claims = new ArrayList<>(stored.size() + 1);
+        stored.stream().filter(claim -> claim.id() != recorded.id()).forEach(claims::add);
+        claims.add(recorded);
+        return outcome(order, claims);
     }
 
     /**
@@ -254,6 +332,22 @@ public final class CancellationRefundPolicy {
 
         public Refund toRefund() {
             return new Refund(amount(), currency);
+        }
+    }
+
+    /**
+     * 남은 수량 전부를 취소하는 전체 취소의 접수 값 (#684 PR-2, {@link #remaining}).
+     *
+     * @param quantities 이번에 취소할 주문 항목별 수량(주문 항목 아이디 → 1 이상) — 남은 수량 전부
+     * @param refund 이번 환불액 {@code due(before)} — 0보다 크다
+     * @param settledRefund 환불이 기록된 취소({@link Claim#isSettledCancellation()})의 환불액 합 — 선행 취소가 없으면 0
+     */
+    public record RemainingCancellation(Map<Long, Integer> quantities, Money refund, Money settledRefund) {
+
+        public RemainingCancellation {
+            quantities = Map.copyOf(Objects.requireNonNull(quantities, "quantities"));
+            Objects.requireNonNull(refund, "refund");
+            Objects.requireNonNull(settledRefund, "settledRefund");
         }
     }
 

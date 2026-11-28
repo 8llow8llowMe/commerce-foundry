@@ -11,12 +11,15 @@ import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.ClaimItem;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderQuoteLine;
+import jakarta.persistence.LockTimeoutException;
+import jakarta.persistence.PessimisticLockException;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -31,7 +34,8 @@ import org.springframework.transaction.annotation.Transactional;
  * 다시 보낸다(payment · product 둘 다 클레임 아이디로 멱등).
  *
  * <p>승인된 반품(#17 B2a)도 이 경로 하나를 같이 쓴다 — 새 파이프라인을 두지 않는다. 유형이 가르는 것은 환불 대기 상태({@link Claim#isAwaitingRefund()}),
- * 재조회 키, 복원 사유 · 생략뿐이다. 로그 문구("cancellation …")는 반품도 그대로 쓴다 — 클레임 아이디로 유형을 가린다.
+ * 복원 사유 · 생략뿐이다(재조회는 두 유형 모두 클레임 아이디, #684 PR-2). 로그 문구("cancellation …")는 반품도 그대로 쓴다 — 클레임 아이디로 유형을 가린다.
+ * 재고 복원은 이번 클레임의 항목 수량만 보낸다 — 부분 취소 뒤 전체 취소면 남은 수량만이다(claimId 멱등).
  */
 @Slf4j
 @Component
@@ -74,7 +78,12 @@ public class OrderCancellationPipelineProcessor {
         return current;
     }
 
-    /** 확정 성공은 실패와 달리 소진 후 버리지 않는다. 두 번의 CAS 뒤 별도 행 잠금 TX로 넘기며 모든 미기록 실패를 503으로 구분한다. */
+    /**
+     * 확정 성공은 실패와 달리 소진 후 버리지 않는다. 두 번의 CAS 뒤 별도 행 잠금 TX로 넘기며 모든 미기록 실패를 503으로 구분한다.
+     *
+     * <p>tx2 의 주문 NOWAIT 잠금에서 지면(#684 PR-2) 클레임 아이디로 다시 읽어, 다른 쪽(스케줄러 · 운영자 · 같은 클레임의 다른 실행)이 이 환불을 이미 기록했으면
+     * 이미 반영된 경우와 같이 빈 값으로 끝낸다(복원은 그쪽이 잇는다). 기록되지 않았으면 그대로 503 이다 — 클레임은 lease 로 남아 스케줄러가 같은 클레임으로 다시 보낸다.
+     */
     private Optional<Claim> recordRefund(Claim source, CancellationStepOutcome outcome) {
         if (outcome.kind() != CancellationStepOutcome.Kind.DONE) {
             return Optional.of(orderCancellationProcessor.recordRefund(source, outcome));
@@ -95,6 +104,11 @@ public class OrderCancellationPipelineProcessor {
                     if (current.hasRecordedRefund()) {
                         return Optional.empty();
                     }
+                } catch (PessimisticLockingFailureException | PessimisticLockException | LockTimeoutException locked) {
+                    if (recordedElsewhere(source)) {
+                        return Optional.empty();
+                    }
+                    throw locked;
                 }
             }
             return orderCancellationProcessor.recordConfirmedRefundWithLock(source);
@@ -103,10 +117,25 @@ public class OrderCancellationPipelineProcessor {
         }
     }
 
-    /** 같은 클레임의 지금 저장된 값 — 취소는 주문당 하나라 주문의 취소 클레임, 반품은 주문에 여럿일 수 있어 클레임 아이디로 읽는다. */
+    /**
+     * 같은 클레임의 지금 저장된 값 — 클레임 아이디로 읽는다. 반품(#17 B2a)도 취소(#684 PR-2 — 부분 취소가 있으면 한 주문에 취소 클레임이 여럿이다)도
+     * 주문에 여럿일 수 있어 주문의 결정적 키로 읽지 않는다. payment 의 환불 멱등 키도 같은 클레임 아이디다.
+     */
     private Optional<Claim> reload(Claim source) {
-        return source.type() == Claim.Type.CANCELLATION
-            ? orderCancellationProcessor.findClaim(source.orderId()) : orderCancellationProcessor.findClaimById(source.id());
+        return orderCancellationProcessor.findClaimById(source.id());
+    }
+
+    /** 주문 잠금에서 진 뒤 — 같은 환불 요청이 이미 기록됐는가(다른 쪽이 반영). 요청이 바뀌었으면 데이터 이상이라 예외다(503). */
+    private boolean recordedElsewhere(Claim source) {
+        Claim current = reload(source).orElseThrow(() -> new IllegalStateException("claim not found"));
+        if (!source.hasSameRefundRequest(current)) {
+            throw new IllegalStateException("refund request changed");
+        }
+        if (current.hasRecordedRefund()) {
+            log.info("cancellation refund already recorded elsewhere while order was locked, stopping. claimId={}, status={}", current.id(), current.status());
+            return true;
+        }
+        return false;
     }
 
     /** ext1 — 저장된 결제 아이디 · 환불액만 보낸다(다시 계산하지 않는다, {@code PAYMENT_019} 방지). Feign 밖 예외(토큰 발급 실패 등)도 미확정이다. */

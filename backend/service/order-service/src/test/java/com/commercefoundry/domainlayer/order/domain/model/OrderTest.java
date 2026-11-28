@@ -349,19 +349,19 @@ class OrderTest {
 
     @ParameterizedTest
     @EnumSource(value = OrderStatus.class, names = {"PAID", "MAKING", "PREPARING"})
-    @DisplayName("requestCancellation — 결제 완료 · 제작 중 · 상품 준비중이면 취소 요청(나머지 값 그대로), 완료는 취소 요청에서 취소 완료다")
-    void requestAndCompleteCancellation(OrderStatus status) {
+    @DisplayName("requestCancellation — 결제 완료 · 제작 중 · 상품 준비중이면 취소 요청(나머지 값 그대로), 전량 정리는 취소 요청에서 취소 완료다")
+    void requestCancellationThenSettleToCanceled(OrderStatus status) {
         Order paid = withStatus(status);
 
         Order requested = paid.requestCancellation();
-        Order canceled = requested.completeCancellation();
+        Order canceled = requested.settleCancellation(CancellationOutcome.CANCELED);
 
         assertThat(requested.status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
         assertThat(requested).usingRecursiveComparison().ignoringFields("status").isEqualTo(paid);
         assertThat(canceled.status()).isEqualTo(OrderStatus.CANCELED);
         assertThat(requested.requestCancellation()).as("더블클릭 · 재시도").isSameAs(requested);
         assertThat(canceled.requestCancellation()).isSameAs(canceled);
-        assertThat(canceled.completeCancellation()).as("확정 반영 재시도").isSameAs(canceled);
+        assertThat(canceled.settleCancellation(CancellationOutcome.CANCELED)).as("확정 반영 재시도").isSameAs(canceled);
     }
 
     @ParameterizedTest
@@ -376,9 +376,9 @@ class OrderTest {
 
     @ParameterizedTest
     @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"CANCEL_REQUESTED", "CANCELED"})
-    @DisplayName("취소 요청이 아닌 주문의 취소 완료는 도메인 전이 예외다 — 결제 전 취소는 cancelBeforePayment 다")
-    void completeCancellationRejected(OrderStatus status) {
-        assertThatThrownBy(() -> withStatus(status).completeCancellation()).isInstanceOf(OrderStatusTransitionException.class);
+    @DisplayName("취소 요청이 아닌 주문의 취소 완료 정리는 도메인 전이 예외다 — 결제 전 취소는 cancelBeforePayment 다")
+    void settleCancellationToCanceledRejected(OrderStatus status) {
+        assertThatThrownBy(() -> withStatus(status).settleCancellation(CancellationOutcome.CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
     }
 
     @Test
@@ -391,7 +391,7 @@ class OrderTest {
             placed.shippingAddress(), placed.stockReservationId(), placed.paymentDueAt(), null, null, null, null);
 
         assertThatThrownBy(unsavedPaid::requestCancellation).isInstanceOf(OrderStatusTransitionException.class);
-        assertThatThrownBy(unsavedRequested::completeCancellation).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> unsavedRequested.settleCancellation(CancellationOutcome.CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
     }
 
     @ParameterizedTest
@@ -419,7 +419,7 @@ class OrderTest {
         Order requested = preparing.requestCancellation();
 
         OrderStatusHistory request = OrderStatusHistory.cancellationRequestedByCustomer(11L, preparing, OrderCancelReason.CHANGE_OF_MIND);
-        OrderStatusHistory refunded = OrderStatusHistory.cancellationRefunded(12L, requested);
+        OrderStatusHistory refunded = OrderStatusHistory.cancellationSettled(12L, requested, requested.settleCancellation(CancellationOutcome.CANCELED));
 
         assertThat(request.fromStatus()).isEqualTo(OrderStatus.PREPARING);
         assertThat(request.toStatus()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
@@ -435,8 +435,9 @@ class OrderTest {
             assertThatThrownBy(() -> OrderStatusHistory.cancellationRequestedByCustomer(13L, withStatus(status), OrderCancelReason.OTHER))
                 .isInstanceOf(IllegalArgumentException.class);
         }
-        assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, preparing)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> OrderStatusHistory.cancellationRefunded(13L, requested.completeCancellation())).isInstanceOf(IllegalArgumentException.class);
+        Order canceled = requested.settleCancellation(CancellationOutcome.CANCELED);
+        assertThatThrownBy(() -> OrderStatusHistory.cancellationSettled(13L, preparing, canceled)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OrderStatusHistory.cancellationSettled(13L, canceled, canceled)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -452,7 +453,6 @@ class OrderTest {
         assertThat(paid).usingRecursiveComparison().ignoringFields("status").isEqualTo(requested);
         assertThat(requested.settleCancellation(CancellationOutcome.STILL_REQUESTED)).as("열린 취소가 남으면 그대로").isSameAs(requested);
         assertThat(canceled.settleCancellation(CancellationOutcome.CANCELED)).as("확정 반영 재시도").isSameAs(canceled);
-        assertThat(canceled.completeCancellation()).as("전체 취소 완료와 같은 멱등").isSameAs(canceled);
         assertThat(paid.settleCancellation(CancellationOutcome.PARTIALLY_CANCELED)).isSameAs(paid);
         assertThatThrownBy(() -> canceled.settleCancellation(CancellationOutcome.PARTIALLY_CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
         assertThatThrownBy(() -> paid.settleCancellation(CancellationOutcome.CANCELED)).isInstanceOf(OrderStatusTransitionException.class);
@@ -584,7 +584,8 @@ class OrderTest {
             .containsExactly(OrderStatus.CANCEL_REQUESTED, OrderStatus.PAID, StatusChangedBy.SERVICE, OrderStatusHistory.PARTIAL_CANCELLATION_REFUNDED);
         assertThat(partial.changedById()).isNull();
         assertThat(partial.reason()).hasSizeLessThanOrEqualTo(200);
-        assertThat(full).as("전체 취소 완료 이력과 같다").isEqualTo(OrderStatusHistory.cancellationRefunded(12L, requested));
+        assertThat(full).as("전체 취소 완료 이력과 같다").isEqualTo(new OrderStatusHistory(12L, requested.id(), OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELED,
+            StatusChangedBy.SERVICE, null, OrderStatusHistory.CANCELLATION_REFUNDED));
         assertThatThrownBy(() -> OrderStatusHistory.cancellationSettled(13L, requested, requested)).as("상태 그대로").isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> OrderStatusHistory.cancellationSettled(13L, paid, paid.requestCancellation())).as("취소 요청에서 출발하지 않음")
             .isInstanceOf(IllegalArgumentException.class);

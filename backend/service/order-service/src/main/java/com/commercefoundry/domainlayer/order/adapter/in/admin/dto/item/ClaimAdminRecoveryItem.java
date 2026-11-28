@@ -19,7 +19,7 @@ public record ClaimAdminRecoveryItem(
     @Schema(description = "지금 '환불 완료로 확정' 을 할 수 있는가 (SETTLEMENT_MANAGE — 대표만). 주문 상태는 실행 때 다시 본다")
     boolean refundConfirmable,
 
-    @Schema(description = "지금 '재고 복원 없이 종결' 을 할 수 있는 접수인가 (SETTLEMENT_MANAGE — 대표만). 주문이 취소 완료인지는 실행 때 본다")
+    @Schema(description = "지금 '재고 복원 없이 종결' 을 할 수 있는 접수인가 (SETTLEMENT_MANAGE — 대표만). 주문 전 수량 취소면 주문이 취소 완료인지는 실행 때 본다")
     boolean completable,
 
     @Schema(description = "마지막 운영자 결정(수동 환불 확정 · 복원 생략 종결). 없으면 null", nullable = true)

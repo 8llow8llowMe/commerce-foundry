@@ -187,7 +187,7 @@ class OrderCancellationPipelineProcessorTest {
         Claim claim = requested();
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
         when(processor.recordRefund(claim, CancellationStepOutcome.done())).thenThrow(new ObjectOptimisticLockingFailureException("claim", 400L));
-        when(processor.findClaim(claim.orderId())).thenReturn(java.util.Optional.of(refunded()));
+        when(processor.findClaimById(claim.id())).thenReturn(java.util.Optional.of(refunded()));
 
         assertThat(pipeline.progress(claim)).isSameAs(claim);
 
@@ -213,7 +213,7 @@ class OrderCancellationPipelineProcessorTest {
         Claim refunded = stored(unconfirmed.markRefunded(NOW), 8L);
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
         when(processor.recordRefund(claim, CancellationStepOutcome.done())).thenThrow(new ObjectOptimisticLockingFailureException("ClaimEntity", 400L));
-        when(processor.findClaim(claim.orderId())).thenReturn(java.util.Optional.of(unconfirmed));
+        when(processor.findClaimById(claim.id())).thenReturn(java.util.Optional.of(unconfirmed));
         when(processor.recordRefund(unconfirmed, CancellationStepOutcome.done())).thenReturn(refunded);
         when(processor.getOrder(claim.orderId())).thenReturn(order());
         when(processor.recordRestoration(refunded, CancellationStepOutcome.done())).thenReturn(stored(refunded.complete(), 9L));
@@ -230,13 +230,13 @@ class OrderCancellationPipelineProcessorTest {
         Claim claim = requested();
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded(), PaymentCancelQueryResult.unknown());
         when(processor.recordRefund(any(), any())).thenThrow(new ObjectOptimisticLockingFailureException("ClaimEntity", 400L));
-        when(processor.findClaim(claim.orderId())).thenReturn(java.util.Optional.of(stored(claim.markRefunded(NOW), 3L)));
+        when(processor.findClaimById(claim.id())).thenReturn(java.util.Optional.of(stored(claim.markRefunded(NOW), 3L)));
 
         assertThat(pipeline.progress(claim)).isSameAs(claim);
         assertThat(pipeline.progress(claim)).isSameAs(claim);
 
         verify(processor, times(2)).recordRefund(any(), any());
-        verify(processor, times(1)).findClaim(claim.orderId());
+        verify(processor, times(1)).findClaimById(claim.id());
         verifyNoInteractions(stockRestorationPort);
     }
 
@@ -247,7 +247,7 @@ class OrderCancellationPipelineProcessorTest {
         Claim confirmed = stored(reopened.markConfirmedRefund(NOW), 4L);
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
         when(processor.recordRefund(any(), any())).thenThrow(new ObjectOptimisticLockingFailureException("ClaimEntity", source.id()));
-        when(processor.findClaim(source.orderId())).thenReturn(java.util.Optional.of(reopened));
+        when(processor.findClaimById(source.id())).thenReturn(java.util.Optional.of(reopened));
         when(processor.recordConfirmedRefundWithLock(source)).thenReturn(java.util.Optional.of(confirmed));
         when(processor.getOrder(source.orderId())).thenReturn(order());
         when(processor.recordRestoration(confirmed, CancellationStepOutcome.done())).thenReturn(stored(confirmed.complete(), 5L));
@@ -262,7 +262,7 @@ class OrderCancellationPipelineProcessorTest {
         Claim source = requested();
         when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
         when(processor.recordRefund(any(), any())).thenThrow(new ObjectOptimisticLockingFailureException("ClaimEntity", source.id()));
-        when(processor.findClaim(source.orderId())).thenReturn(java.util.Optional.of(stored(source, 3L)));
+        when(processor.findClaimById(source.id())).thenReturn(java.util.Optional.of(stored(source, 3L)));
         when(processor.recordConfirmedRefundWithLock(source)).thenThrow(new org.springframework.transaction.TransactionSystemException("commit failed"));
         assertThatThrownBy(() -> pipeline.progress(source)).isInstanceOfSatisfying(OrderException.class,
             failure -> assertThat(failure.getErrorCode()).isEqualTo(OrderErrorCode.CANCELLATION_REFUND_RECORDING_UNAVAILABLE));

@@ -4,11 +4,12 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCod
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.port.out.ClaimRepositoryPort;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderRepositoryPort;
+import com.commercefoundry.domainlayer.order.domain.model.CancellationRefundPolicy;
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import com.commercefoundry.domainlayer.order.domain.model.ClaimAdminRecoveryPolicy;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
-import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
+import com.commercefoundry.domainlayer.order.domain.model.OrderStatusTransitionException;
 import com.commercefoundry.domainlayer.order.domain.model.ReturnRefundPolicy;
 import com.commercefoundry.global.properties.OrderCancellationProperties;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
@@ -48,15 +49,22 @@ public class ClaimAdminRecoveryProcessor {
     private final Clock clock;
 
     /**
-     * 수동 환불 확정 (#17 A3) — 대표 관리자가 PG · 결제 기록에서 환불을 확인한 환불 실패를 REFUNDED(재고 복원 대기)로 바꾸고, 주문이 취소 요청이면
-     * 취소 완료 + {@code ADMIN} 이력(사유)을 같은 커밋에 남긴다. PG 를 부르지 않는다 — 이어지는 재고 복원은 부르는 쪽이 트랜잭션 밖에서 잇는다.
+     * 수동 환불 확정 (#17 A3, 반품 B2b, 부분 취소 #684 PR-2) — 대표 관리자가 PG · 결제 기록에서 환불을 확인한 환불 실패를 REFUNDED(재고 복원 대기)로 바꾸고,
+     * 같은 커밋에서 주문을 정리한다 — 취소는 취소 정리({@link CancellationRefundPolicy#outcome(Order, List, Claim)} → {@link Order#settleCancellation} — 전량이면
+     * 취소 완료, 일부면 결제 완료로 복귀), 반품은 반품 정리({@link ReturnRefundPolicy#outcome} → {@link Order#settleReturn}). 바뀌었으면 {@code ADMIN} 이력(사유)이다.
+     * 자동 반영({@code OrderCancellationProcessor#applyCancellationRefunded} · {@code #applyReturnRefunded})과 같은 정리이고 이력만 SERVICE 대신 ADMIN 이다.
+     * PG 를 부르지 않는다 — 이어지는 재고 복원은 부르는 쪽이 트랜잭션 밖에서 잇는다.
      *
-     * <p>자격은 {@link ClaimAdminRecoveryPolicy#requireRefundConfirmation} 이 본다 — 결제사 거절은 늘, 결과 미확인은 다시 시도가 결제 취소 키 기한으로
-     * 닫혔을 때만({@link #isRefundRetryClosed}) 받는다. 기한 안의 결과 미확인은 다시 시도가 PG 결과를 확인한다.
+     * <p>열림 → 정산 전이라 <b>주문을 먼저 NOWAIT 으로 잠근다</b>({@code order-flow-guide.md} §1-2) — 클레임만으로 후보가 아니면 잠그지 않고 거절한다.
+     * 이어서 클레임을 NOWAIT 으로 잠가 다시 읽고 화면 버전을 다시 대조한다(주문 → 클레임 순서, 다르면 409). 판정 입력은 잠금 뒤 읽은 클레임 목록에 이번 클레임의 확정 결과를 바꿔 넣은 것이다. 정리 판정이 불가능하면(데이터 이상) 저장하지 않고 409 다 — 자동 반영과 달리
+     * 운영자 앞이라 fail-closed 저장 대신 거절한다. 재고로 되돌리지 않는 반품은 같은 커밋에서 COMPLETED 다.
+     *
+     * <p>자격은 {@link ClaimAdminRecoveryPolicy#requireRefundConfirmation} 이 본다 — 결제사 거절은 늘, 결과 미확인 · 반품의 막힘은 다시 시도가 결제 취소 키
+     * 기한으로 닫혔을 때만({@link #isRefundRetryClosed}) 받는다. 기한 안이면 다시 시도가 PG 결과를 확인한다.
      *
      * @return 저장된 클레임(올라간 버전)
-     * @throws OrderException 재시도 스케줄러 꺼짐 {@code CLAIM_RETRY_UNAVAILABLE} · 없음 {@code NOT_FOUND_CLAIM} · 버전 불일치 · 저장 경합
-     *     {@code CLAIM_CONCURRENTLY_CHANGED} · 자격 없음(환불 실패가 아님 · 반품 · 기한 안의 결과 미확인 · 주문이 취소 요청 · 취소 완료가 아님)
+     * @throws OrderException 재시도 스케줄러 꺼짐 {@code CLAIM_RETRY_UNAVAILABLE} · 없음 {@code NOT_FOUND_CLAIM} · 버전 불일치 · 주문 잠금 · 저장 경합
+     *     {@code CLAIM_CONCURRENTLY_CHANGED} · 자격 없음(환불 실패가 아님 · 기한 안의 결과 미확인 · 주문 상태가 맞지 않음 · 정리 판정 불가)
      *     {@code CLAIM_DECISION_NOT_ALLOWED}
      */
     @Transactional(timeout = 5)
@@ -65,69 +73,41 @@ public class ClaimAdminRecoveryProcessor {
         if (!properties.paidCancellationOpen()) {
             throw new OrderException(OrderErrorCode.CLAIM_RETRY_UNAVAILABLE);
         }
-        Claim claim = loadExpected(claimId, expectedVersion);
-        if (claim.type() == Claim.Type.RETURN) {
-            return confirmReturnRefund(claim, reason, adminId);
-        }
-        Order order = orderRepositoryPort.findById(claim.orderId()).orElseThrow(() -> new IllegalStateException("claim order not found"));
-        Instant now = clock.instant();
-        requireRefundConfirmation(claim, order, now);
-        Claim refunded = claim.confirmRefundByAdmin(decision(claim, reason, adminId, now), now.plus(properties.retry().lease()));
-        Claim saved;
-        try {
-            // 저장 분기는 자동 환불 확정 반영({@link OrderCancellationProcessor#applyRefunded})과 같다 — 주문 이력만 SERVICE 대신 ADMIN · 사유다
-            saved = claimRepositoryPort.update(refunded);
-            if (order.status() == OrderStatus.CANCEL_REQUESTED) {
-                Order canceled = order.completeCancellation();
-                orderRepositoryPort.saveStatusChange(canceled,
-                    OrderStatusHistory.changedByAdmin(snowflakeIdGenerator.generateId(), order, canceled, adminId, reason));
-            }
-        } catch (OptimisticLockingFailureException exception) {
-            throw new OrderException(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
-        }
-        log.warn("cancellation refund confirmed by admin without PG call. claimId={}, orderId={}, paymentId={}, previousFailureCode={}, adminId={}",
-            claim.id(), claim.orderId(), claim.paymentId(), claim.failureCode(), adminId);
-        return saved;
-    }
-
-    /**
-     * 반품 수동 환불 확정 (#17 B2b) — 반품의 열림 → 정산 전이라 <b>주문을 먼저 NOWAIT 으로 잠근다</b>({@code order-flow-guide.md} §1-2). 확정 · 주문 정리
-     * ({@link ReturnRefundPolicy#outcome} → {@link Order#settleReturn}) · {@code ADMIN} 이력(사유)이 한 커밋이다 — 자동 반영
-     * ({@code OrderCancellationProcessor#applyReturnRefunded})과 같은 정리이고 이력만 SERVICE 대신 ADMIN 이다. 재고로 되돌리지 않는 반품은 같은 커밋에서 COMPLETED 다.
-     * 정리 판정이 불가능하면(데이터 이상) 저장하지 않고 409 다 — 자동 반영과 달리 운영자 앞이라 fail-closed 저장 대신 거절한다.
-     */
-    private Claim confirmReturnRefund(Claim claim, String reason, long adminId) {
+        Claim candidate = loadExpected(claimId, expectedVersion);
         // 클레임만으로 후보가 아니면 주문을 잠그지 않고 바로 거절한다 — 잠금은 실제로 바꿀 요청만 잡는다
-        if (!ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(claim, isRefundRetryClosed(claim, clock.instant()))) {
-            log.warn("refund confirmation refused. claimId={}, orderId={}, claimStatus={}, failureCode={}", claim.id(), claim.orderId(), claim.status(),
-                claim.failureCode());
+        if (!ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(candidate, isRefundRetryClosed(candidate, clock.instant()))) {
+            log.warn("refund confirmation refused. claimId={}, orderId={}, claimStatus={}, failureCode={}", candidate.id(), candidate.orderId(),
+                candidate.status(), candidate.failureCode());
             throw new OrderException(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
         }
         Order order;
+        Claim claim;
         try {
-            order = orderRepositoryPort.findByIdForUpdate(claim.orderId()).orElseThrow(() -> new IllegalStateException("claim order not found"));
+            // 주문 → 클레임 순서로 잠근다(§1-2). 잠근 클레임의 버전을 화면 버전과 다시 대조한다 — 첫 읽기와 잠금 사이에 다른 쪽이 바꿨으면 그 값으로 판정하지 않는다
+            order = orderRepositoryPort.findByIdForUpdate(candidate.orderId()).orElseThrow(() -> new IllegalStateException("claim order not found"));
+            claim = claimRepositoryPort.findByIdForUpdate(claimId).orElseThrow(() -> new OrderException(OrderErrorCode.NOT_FOUND_CLAIM));
         } catch (PessimisticLockingFailureException | PessimisticLockException | LockTimeoutException exception) {
-            // 같은 주문의 다른 반품 결정 · 환불 기록이 잡고 있다 — 기다리지 않고 화면을 다시 읽게 한다
+            // 같은 주문의 다른 클레임 결정 · 환불 기록이 잡고 있다 — 기다리지 않고 화면을 다시 읽게 한다
+            throw new OrderException(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+        }
+        if (!Objects.equals(claim.version(), expectedVersion)) {
             throw new OrderException(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
         }
         Instant now = clock.instant();
         requireRefundConfirmation(claim, order, now);
         Claim refunded = claim.confirmRefundByAdmin(decision(claim, reason, adminId, now), now.plus(properties.retry().lease()));
         Claim recorded = refunded.requiresRestoration() ? refunded : refunded.complete();
-        List<Claim> claims = claimRepositoryPort.findAllByOrderId(order.id()).stream()
-            .map(stored -> stored.id() == recorded.id() ? recorded : stored).toList();
-        ReturnRefundPolicy.ReturnOutcome outcome;
+        Order settled;
         try {
-            outcome = ReturnRefundPolicy.outcome(order, claims);
-        } catch (IllegalStateException | IllegalArgumentException invalid) {
-            log.warn("return refund confirmation refused, order claims cannot be settled. claimId={}, orderId={}, error={}", claim.id(), order.id(),
-                invalid.getClass().getSimpleName());
+            settled = settle(order, claimRepositoryPort.findAllByOrderId(order.id()), recorded);
+        } catch (IllegalStateException | IllegalArgumentException | OrderStatusTransitionException invalid) {
+            log.warn("refund confirmation refused, order claims cannot be settled. claimId={}, orderId={}, type={}, error={}", claim.id(), order.id(),
+                claim.type(), invalid.getClass().getSimpleName());
             throw new OrderException(OrderErrorCode.CLAIM_DECISION_NOT_ALLOWED);
         }
         Claim saved;
         try {
             saved = claimRepositoryPort.update(recorded);
-            Order settled = order.settleReturn(outcome);
             if (settled.status() != order.status()) {
                 orderRepositoryPort.saveStatusChange(settled,
                     OrderStatusHistory.changedByAdmin(snowflakeIdGenerator.generateId(), order, settled, adminId, reason));
@@ -135,9 +115,23 @@ public class ClaimAdminRecoveryProcessor {
         } catch (OptimisticLockingFailureException exception) {
             throw new OrderException(OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
         }
-        log.warn("return refund confirmed by admin without PG call. claimId={}, orderId={}, paymentId={}, previousFailureCode={}, adminId={}",
-            claim.id(), claim.orderId(), claim.paymentId(), claim.failureCode(), adminId);
+        log.warn("{} refund confirmed by admin without PG call. claimId={}, orderId={}, paymentId={}, previousFailureCode={}, adminId={}, orderStatus={}",
+            claim.type() == Claim.Type.RETURN ? "return" : "cancellation", claim.id(), claim.orderId(), claim.paymentId(), claim.failureCode(), adminId,
+            settled.status());
         return saved;
+    }
+
+    /**
+     * 확정과 함께 할 주문 정리 — 판정 입력은 잠금 뒤 읽은 목록({@code stored})에 이번 클레임의 확정 결과({@code recorded})를 바꿔 넣은 것이다.
+     *
+     * @throws IllegalStateException · IllegalArgumentException 정책의 데이터 이상 · {@link OrderStatusTransitionException} 정리 전이 불가
+     */
+    private static Order settle(Order order, List<Claim> stored, Claim recorded) {
+        if (recorded.type() == Claim.Type.RETURN) {
+            List<Claim> claims = stored.stream().map(claim -> claim.id() == recorded.id() ? recorded : claim).toList();
+            return order.settleReturn(ReturnRefundPolicy.outcome(order, claims));
+        }
+        return order.settleCancellation(CancellationRefundPolicy.outcome(order, stored, recorded));
     }
 
     private void requireRefundConfirmation(Claim claim, Order order, Instant now) {
@@ -151,8 +145,10 @@ public class ClaimAdminRecoveryProcessor {
     }
 
     /**
-     * 복원 생략 종결 (#17 A3) — 재고 복원이 종결 실패한(확정 실패 코드) 취소 완료 주문의 클레임을 복원 없이 COMPLETED 로 닫는다. 재고는 운영자가 재고 조정으로
-     * 먼저 맞춘다. 원격을 부르지 않고 주문은 바꾸지 않는다. 결과 미확인({@code RESTORATION_UNCONFIRMED})은 실제로 복원됐을 수 있어 종결하지 않는다(다시 시도).
+     * 복원 생략 종결 (#17 A3) — 재고 복원이 종결 실패한(확정 실패 코드) 클레임을 복원 없이 COMPLETED 로 닫는다. 재고는 운영자가 재고 조정으로 먼저 맞춘다.
+     * 원격을 부르지 않고 주문은 보기만 하고 바꾸지 않는다 — 주문 전 수량 취소는 주문이 취소 완료여야 하고, 일부 수량 취소(#684 — 정리 뒤 결제 완료로 돌아가
+     * 출고 · 다음 취소로 넘어갔을 수 있다)와 반품은 주문 상태를 보지 않는다({@link ClaimAdminRecoveryPolicy#requireCompletion}). 정산 → 정산 전이라 주문을 잠그지 않는다.
+     * 결과 미확인({@code RESTORATION_UNCONFIRMED})은 실제로 복원됐을 수 있어 종결하지 않는다(다시 시도).
      *
      * @return 저장된 클레임(올라간 버전)
      * @throws OrderException 없음 {@code NOT_FOUND_CLAIM} · 버전 불일치 · 저장 경합 {@code CLAIM_CONCURRENTLY_CHANGED} · 자격 없음 {@code CLAIM_DECISION_NOT_ALLOWED}
