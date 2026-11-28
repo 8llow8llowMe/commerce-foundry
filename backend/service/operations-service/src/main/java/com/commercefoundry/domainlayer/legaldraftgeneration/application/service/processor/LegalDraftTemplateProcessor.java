@@ -1,8 +1,7 @@
 package com.commercefoundry.domainlayer.legaldraftgeneration.application.service.processor;
 
-import com.commercefoundry.domainlayer.legaldocument.application.info.LegalDocumentInfos.Template;
-import com.commercefoundry.domainlayer.legaldocument.application.service.processor.LegalDocumentTemplateProcessor;
 import com.commercefoundry.domainlayer.legaldocument.domain.model.LegalDocumentKey;
+import com.commercefoundry.domainlayer.legaldocument.domain.model.LegalDocumentTemplate;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.exception.LegalDraftErrorCode;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.exception.LegalDraftException;
 import com.commercefoundry.domainlayer.legaldraftgeneration.application.info.LegalDraftInfo.Candidate;
@@ -15,18 +14,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+/** legaldocument 의 시작 템플릿(domain 상수)을 직접 읽는다 — 다른 컨텍스트의 Info · Processor 를 거치지 않는다(H8). */
 @Component
-@RequiredArgsConstructor
 public class LegalDraftTemplateProcessor {
     private static final String COMPANY = "COMPANY_NAME";
     private static final Pattern SECTION = Pattern.compile("^\\d+\\. (.+)\\n\\{\\{([A-Z_]+)}}: (.+)$");
-    private final LegalDocumentTemplateProcessor templates;
 
     public Outline prepare(LegalDraftInput input) {
-        Template template = templates.get(new LegalDocumentKey(LegalDocumentKey.Type.valueOf(input.type()), input.locale()));
+        var template = LegalDocumentTemplate.of(new LegalDocumentKey(LegalDocumentKey.Type.valueOf(input.type()), input.locale()));
         if (template.version() != input.templateVersion()) {
             throw new LegalDraftException(LegalDraftErrorCode.TEMPLATE_CONFLICT);
         }
@@ -51,7 +48,8 @@ public class LegalDraftTemplateProcessor {
                 throw new LegalDraftException(LegalDraftErrorCode.INVALID_REQUEST);
             }
         }
-        return new Outline(template, blocks[0], Map.copyOf(sections), List.copyOf(sections.keySet()));
+        return new Outline(template.templateId(), template.version(), template.title(), template.checklist(), blocks[0],
+            Map.copyOf(sections), List.copyOf(sections.keySet()));
     }
 
     public Candidate assemble(LegalDraftInput input, Outline outline, LegalDraftPlan plan) {
@@ -76,16 +74,16 @@ public class LegalDraftTemplateProcessor {
             }
             body.append("\n\n").append(++index).append(". ").append(section.title()).append("\n").append(fact);
         }
-        Template template = outline.template();
-        return new Candidate(LegalDraftDocumentType.valueOf(template.type()).toMetadata(), template.locale(), template.title(), body.toString(), template.templateId(),
-            template.version(), List.copyOf(unresolved), template.checklist());
+        return new Candidate(LegalDraftDocumentType.valueOf(input.type()).toMetadata(), input.locale(), outline.title(), body.toString(),
+            outline.templateId(), outline.version(), List.copyOf(unresolved), outline.checklist());
     }
 
     private static String placeholder(String key) {
         return "{{" + key + "}}";
     }
 
-    public record Outline(Template template, String heading, Map<String, Section> sections, List<String> sectionIds) {}
+    public record Outline(String templateId, int version, String title, List<String> checklist, String heading,
+                          Map<String, Section> sections, List<String> sectionIds) {}
 
     public record Section(String title, String question) {}
 }

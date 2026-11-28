@@ -10,6 +10,7 @@ import com.commercefoundry.security.audit.AdminAudited;
 import com.commercefoundry.security.principal.AdminAuthority;
 import com.commercefoundry.security.principal.MemberPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +39,8 @@ public class LegalDraftGenerationAdminController {
     @AdminAudited(action = "LEGAL_DRAFT_GENERATION_REGISTER")
     @PostMapping
     public ResponseEntity<Response<LegalDraftGenerationResponse.Accepted>> register(
-        @AuthenticationPrincipal MemberPrincipal member, @RequestHeader("Idempotency-Key") String requestKey,
+        @AuthenticationPrincipal MemberPrincipal member,
+        @Parameter(description = "같은 요청을 다시 보낼 때 쓰는 요청 키 (16~80자)") @RequestHeader("Idempotency-Key") String requestKey,
         @RequestBody LegalDraftGenerationRequest request
     ) {
         var command = new LegalDraftRegisterCommand(member.memberId(), requestKey, request.type(), request.locale(), request.templateVersion(),
@@ -49,7 +51,9 @@ public class LegalDraftGenerationAdminController {
     @Operation(summary = "내 생성 작업 상태와 검토용 후보 조회")
     @PreAuthorize(AdminAuthority.SETTINGS_READ)
     @GetMapping("/{jobId}")
-    public ResponseEntity<Response<LegalDraftGenerationResponse>> get(@AuthenticationPrincipal MemberPrincipal member, @PathVariable long jobId) {
+    public ResponseEntity<Response<LegalDraftGenerationResponse>> get(
+        @AuthenticationPrincipal MemberPrincipal member, @Parameter(description = "작업 아이디") @PathVariable long jobId
+    ) {
         return ok(useCase.get(member.memberId(), jobId));
     }
 
@@ -57,7 +61,9 @@ public class LegalDraftGenerationAdminController {
     @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "LEGAL_DRAFT_GENERATION_REVIEW")
     @PostMapping("/{jobId}/review")
-    public ResponseEntity<Response<LegalDraftGenerationResponse>> review(@AuthenticationPrincipal MemberPrincipal member, @PathVariable long jobId) {
+    public ResponseEntity<Response<LegalDraftGenerationResponse>> review(
+        @AuthenticationPrincipal MemberPrincipal member, @Parameter(description = "작업 아이디") @PathVariable long jobId
+    ) {
         return ok(useCase.review(member.memberId(), jobId));
     }
 
@@ -65,7 +71,9 @@ public class LegalDraftGenerationAdminController {
     @PreAuthorize(AdminAuthority.SETTINGS_MANAGE)
     @AdminAudited(action = "LEGAL_DRAFT_GENERATION_CANCEL")
     @PostMapping("/{jobId}/cancel")
-    public ResponseEntity<Response<LegalDraftGenerationResponse>> cancel(@AuthenticationPrincipal MemberPrincipal member, @PathVariable long jobId) {
+    public ResponseEntity<Response<LegalDraftGenerationResponse>> cancel(
+        @AuthenticationPrincipal MemberPrincipal member, @Parameter(description = "작업 아이디") @PathVariable long jobId
+    ) {
         return ok(useCase.cancel(member.memberId(), jobId));
     }
 
