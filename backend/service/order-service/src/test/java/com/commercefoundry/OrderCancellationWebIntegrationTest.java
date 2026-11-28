@@ -21,8 +21,11 @@ import com.commercefoundry.domainlayer.order.domain.model.OrderStatus;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStatusHistory;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import com.commercefoundry.security.principal.MemberRole;
+import com.commercefoundry.security.support.TestServiceTokens;
 import com.commercefoundry.security.support.TestTokens;
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -31,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,6 +50,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * 결제 후 고객 취소 (#16 PR-2) — 실제 JWT · 권한 · Facade · 단계별 트랜잭션 · H2 를 관통하고 payment · product 호출만 스텁한다. 결제 전 취소 경로 회귀도 본다.
+ *
+ * <p>취소와 맞물리는 송장 확정(출고 반영 internal API)의 경합 · 재시도도 여기서 본다(#363) — 같은 컨텍스트를 쓰려고 별도 클래스를 만들지 않는다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -218,6 +224,83 @@ class OrderCancellationWebIntegrationTest {
         assertThat(detail).bodyJson().extractingPath("$.dataBody.cancelable").isEqualTo(true);
         var list = mvc.get().uri("/api/v1/orders?size=100").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).exchange();
         assertThat(list).bodyJson().extractingPath("$.dataBody.contents[?(@.orderId=='" + paid.id() + "')].cancelable").asArray().containsExactly(true);
+    }
+
+    /** delivery-service 가 송장 확정 때 부르는 출고 반영 internal API (#18) — 실제 서비스 토큰(aud = order-service)을 싣는다. */
+    MvcTestResult ship(long orderId, Instant shippedAt) {
+        return mvc.post().uri("/internal/v1/orders/{orderId}/shipment", orderId)
+            .header(HttpHeaders.AUTHORIZATION, TestServiceTokens.bearer("delivery-service", "order-service"))
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"deliveryId\":\"" + ids.generateId() + "\",\"shippedAt\":\"" + shippedAt + "\"}").exchange();
+    }
+
+    long shipmentHistoryCount(long orderId) {
+        return jdbc.queryForObject("select count(*) from orders.order_status_history where order_id = ? and to_status = 'SHIPPING'", Long.class, orderId);
+    }
+
+    /** #363 — 포장 검수 뒤 고객 취소가 먼저 들어오면, 뒤늦은 송장 확정은 주문을 다시 읽어 409 로 거절되고 취소 상태 · 출고 시각을 건드리지 않는다. */
+    @Test
+    void shipmentAfterCustomerCancellationIsRejectedAndKeepsCancellation() {
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.unknown());
+        Order requested = create(OrderStatus.PREPARING, ids.generateId());
+        assertThat(cancel(requested.id(), TestTokens.MEMBER_ID)).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("CANCEL_REQUESTED");
+        when(paymentCancelPort.cancel(anyLong(), anyLong(), any())).thenReturn(PaymentCancelQueryResult.succeeded());
+        Order canceled = create(OrderStatus.PREPARING, ids.generateId());
+        assertThat(cancel(canceled.id(), TestTokens.MEMBER_ID)).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("CANCELED");
+
+        assertFailure(ship(requested.id(), Instant.now()), 409, "ORDER_020");
+        assertFailure(ship(canceled.id(), Instant.now()), 409, "ORDER_020");
+
+        assertThat(jdbc.queryForMap("select status, shipped_at from orders.orders where id = ?", requested.id()))
+            .containsEntry("status", "CANCEL_REQUESTED").containsEntry("shipped_at", null);
+        assertThat(jdbc.queryForMap("select status, shipped_at from orders.orders where id = ?", canceled.id()))
+            .containsEntry("status", "CANCELED").containsEntry("shipped_at", null);
+        assertThat(shipmentHistoryCount(requested.id())).isZero();
+        assertThat(shipmentHistoryCount(canceled.id())).isZero();
+    }
+
+    /**
+     * #363 — 출고 반영이 주문을 읽은 뒤 고객 취소가 먼저 커밋하는 경합. {@code OrderFulfillmentProcessor} 의 읽기 → {@code Order.ship} → 저장 순서를
+     * 그대로 재현해, 낡은 버전의 출고 저장이 버전 비교로 실패하고 취소가 남는지 본다. 이어진 재시도도 새로 읽어 409 로 거절된다.
+     */
+    @Test
+    void staleShipmentCannotOverwriteCancellationCommittedAfterRead() {
+        Order order = create(OrderStatus.PREPARING, ids.generateId());
+        Order readByShipment = orders.findById(order.id()).orElseThrow();
+
+        assertThat(cancel(order.id(), TestTokens.MEMBER_ID)).bodyJson().extractingPath("$.dataBody.status.code").isEqualTo("CANCELED");
+
+        Order shipped = readByShipment.ship(Instant.now());
+        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).executeWithoutResult(s -> orders.saveStatusChange(shipped,
+            OrderStatusHistory.changedByService(ids.generateId(), readByShipment, shipped, OrderStatusHistory.SHIPMENT_REGISTERED))))
+            .isInstanceOf(OptimisticLockingFailureException.class);
+        assertThat(jdbc.queryForMap("select status, shipped_at from orders.orders where id = ?", order.id()))
+            .containsEntry("status", "CANCELED").containsEntry("shipped_at", null);
+        assertThat(shipmentHistoryCount(order.id())).isZero();
+
+        assertFailure(ship(order.id(), Instant.now()), 409, "ORDER_020");
+        assertThat(shipmentHistoryCount(order.id())).isZero();
+    }
+
+    /**
+     * #363 — 같은 송장 확정을 다시 보내도(delivery 재시도 · 다른 운영자의 재등록) 출고는 한 번만 반영된다: 이력 한 줄, 첫 출고 시각 유지, 재고 · 결제 호출 없음.
+     * 재고는 주문 생성 때 선점 · 차감되고 출고 반영은 재고를 부르지 않으므로 재시도가 재고를 다시 줄일 길이 없다.
+     */
+    @Test
+    void repeatedShipmentIsAppliedOnceWithoutStockOrPaymentCalls() {
+        Order order = create(OrderStatus.PREPARING, ids.generateId());
+        Instant firstShippedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS).minusSeconds(60);
+
+        var first = ship(order.id(), firstShippedAt);
+        var retried = ship(order.id(), firstShippedAt.plusSeconds(30));
+
+        assertThat(first).hasStatus(200);
+        assertThat(first).bodyJson().extractingPath("$.dataBody.status").isEqualTo("SHIPPING");
+        assertThat(retried).hasStatus(200);
+        assertThat(retried).bodyJson().extractingPath("$.dataBody.status").isEqualTo("SHIPPING");
+        assertThat(shipmentHistoryCount(order.id())).isEqualTo(1L);
+        assertThat(jdbc.queryForObject("select shipped_at from orders.orders where id = ?", Timestamp.class, order.id()).toInstant()).isEqualTo(firstShippedAt);
+        verifyNoInteractions(paymentCancelPort, stockRestorationPort);
     }
 
     /** 미결제 만료 · 자동 구매 확정 · 취소 재시도 · 결제 반영 재고 복원이 서로 막지 않게 스케줄링 스레드가 여럿이다(application.yml {@code spring.task.scheduling.pool.size}). */
