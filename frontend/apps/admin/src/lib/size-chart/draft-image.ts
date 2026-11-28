@@ -1,5 +1,6 @@
 import { ApiError } from '@cf/api-client';
 import { accessDeniedOf, type AccessDenied } from '@/lib/api-errors';
+import type { TextSelection } from './text-source';
 import type { CodeName } from './types';
 
 /**
@@ -38,12 +39,26 @@ export type ImageInspection = {
 
 export type ApprovedImage = { sourceId: string; approvedContentHash: string };
 
-/** 생성 요청 입력. TEXT 흐름은 그대로 두고 IMAGE 를 나란히 둔다 */
+/**
+ * 생성 요청 입력. TEXT 흐름은 그대로 두고 IMAGE 를 나란히 둔다.
+ * TEXT 의 `selection` 은 상품 본문 후보를 고친 데 없이 그대로 고른 경우의 출처다(`./text-source`). 고쳤으면 null 이다.
+ */
 export type DraftInput =
-  { mode: 'TEXT'; sourceText: string } | { mode: 'IMAGE'; images: readonly ApprovedImage[] };
+  | { mode: 'TEXT'; sourceText: string; selection?: TextSelection | null }
+  | { mode: 'IMAGE'; images: readonly ApprovedImage[] };
 
-/** 생성 본문. IMAGE 는 운영자가 개인정보 확인란을 체크해야만 만든다(화면이 막는다) */
+/**
+ * 생성 본문. IMAGE 는 운영자가 개인정보 확인란을 체크해야만 만든다(화면이 막는다).
+ * 본문 후보를 고른 TEXT 는 서버가 후보 텍스트와 정확히 같아야 받으므로 다듬지 않고 그대로 보낸다.
+ */
 export function draftBody(templateId: string, input: DraftInput) {
+  if (input.mode === 'TEXT' && input.selection)
+    return {
+      templateId,
+      mode: 'TEXT' as const,
+      sourceText: input.sourceText,
+      textSelection: { sourceId: input.selection.sourceId, bodyHash: input.selection.bodyHash },
+    };
   return input.mode === 'TEXT'
     ? { templateId, mode: 'TEXT' as const, sourceText: input.sourceText.trim() }
     : {
@@ -58,7 +73,8 @@ export function draftBody(templateId: string, input: DraftInput) {
 }
 
 /**
- * 멱등 키 지문. TEXT 는 기존 모양(`템플릿\n텍스트`) 그대로다. IMAGE 는 순서 · 확인값까지 넣는다 —
+ * 멱등 키 지문. TEXT 는 기존 모양(`템플릿\n텍스트`) 그대로다 — 본문 후보 선택 정보는 넣지 않는다(BE 멱등 해시도 텍스트만 본다).
+ * 그래서 같은 텍스트를 후보로 골랐다가 직접 입력으로 바꿔도 같은 키이고, 서버는 같은 초안을 돌려준다(다른 입력 409 가 아니다). IMAGE 는 순서 · 확인값까지 넣는다 —
  * BE 요청 해시가 `[productId, templateId, "IMAGE", [[sourceId, hash]…], true]`(순서 포함)라 하나라도 바뀌면 새 키여야 한다.
  */
 export function inputFingerprint(templateId: string, input: DraftInput): string {

@@ -11,16 +11,33 @@ import {
   statusOf,
   type SizeChartDraft,
 } from '@/lib/size-chart/draft';
+import {
+  afterSourceChanged,
+  pickAfterEdit,
+  selectionOf,
+  sourceLabel,
+  type TextSource,
+  type TextSourcesState,
+} from '@/lib/size-chart/text-source';
 import { SizeChartImagePicker } from './SizeChartImagePicker';
+import { TextSourceOptions } from './TextSourceOptions';
 import type { SizeChartDraftState } from './useSizeChartDraft';
 import type { SizeChartImageSourcesState } from './useSizeChartImageSources';
 
 type InputMode = 'TEXT' | 'IMAGE';
 
+/** 이 상품 본문의 치수표 후보(`useTextSources` 를 상품 하나로 묶은 것) */
+export type ProductTextSources = {
+  state: TextSourcesState;
+  load: () => Promise<TextSource[] | null>;
+};
+
 type Props = {
   ai: SizeChartDraftState;
   /** IMAGE 입력의 상품 이미지 후보 · 선택 · 확인 */
   images: SizeChartImageSourcesState;
+  /** TEXT 입력의 "상품 본문에서 고르기" 후보 */
+  textSources: ProductTextSources;
   /** 편집기에서 고른 템플릿. 없으면 요청할 수 없다 */
   templateId: string | null;
   /** 이 초안을 표에서 검토 중이다 */
@@ -33,11 +50,24 @@ type Props = {
 /**
  * AI 사이즈표 초안 패널(#218). 치수 텍스트 또는 상품 관리 이미지 → 초안 요청 → 생성 진행 → 표에 불러와 검토 → (편집기의) 초안 적용.
  * 이미지 입력은 BE 플래그가 열린 환경에서만 쓸 수 있다 — 닫혀 있으면(011) 안내만 두고 텍스트로 요청하게 한다.
+ * 치수 텍스트는 상품 본문에서 찾은 표를 고를 수도 있다. 고른 표를 고치지 않고 보내면 출처(`textSelection`)를 함께 보내고,
+ * 고치면 출처 없이 직접 입력으로 보낸다(서버는 후보와 정확히 같은 텍스트만 출처로 받는다).
  */
-export function SizeChartDraftPanel({ ai, images, templateId, reviewing, busy, onReview }: Props) {
+export function SizeChartDraftPanel({
+  ai,
+  images,
+  textSources,
+  templateId,
+  reviewing,
+  busy,
+  onReview,
+}: Props) {
   const id = useId();
   const [mode, setMode] = useState<InputMode>('TEXT');
   const [sourceText, setSourceText] = useState('');
+  /** 본문에서 고른 표. 텍스트를 고치면 null(직접 입력) */
+  const [picked, setPicked] = useState<TextSource | null>(null);
+  const [showSources, setShowSources] = useState(false);
   // 개인정보 확인은 승인할 이미지 바이트(이미지 · 확인값 묶음)에 대한 것이다 — 선택이나 확인값이 바뀌면 다시 확인받는다
   const [confirmedFor, setConfirmedFor] = useState<string | null>(null);
   const selectionKey = confirmationKey(images.approved);
@@ -62,15 +92,39 @@ export function SizeChartDraftPanel({ ai, images, templateId, reviewing, busy, o
     if (next === 'IMAGE') images.load();
   };
 
+  const openSources = () => {
+    setShowSources(true);
+    if (textSources.state.status !== 'ok' && textSources.state.status !== 'loading')
+      void textSources.load();
+  };
+
+  const pick = (source: TextSource) => {
+    setSourceText(source.sourceText);
+    setPicked(source);
+    ai.clearSourceError();
+  };
+
   const submit = async () => {
     if (!templateId) return;
     if (mode === 'TEXT') {
-      await ai.request(templateId, { mode: 'TEXT', sourceText });
+      const follow = await ai.request(templateId, {
+        mode: 'TEXT',
+        sourceText,
+        selection: picked ? selectionOf(picked) : null,
+      });
+      if (follow?.action === 'reloadTextSources') {
+        // 고른 표가 본문과 달라졌다 — 고치지 않은 후보 텍스트라 비우고, 다시 읽은 목록에서 다시 고르게 한다
+        const next = afterSourceChanged(picked, sourceText);
+        setSourceText(next.text);
+        setPicked(next.picked);
+        setShowSources(true);
+        void textSources.load();
+      }
       return;
     }
     if (!images.approved) return;
     const follow = await ai.request(templateId, { mode: 'IMAGE', images: images.approved });
-    if (!follow) return;
+    if (!follow || follow.action === 'reloadTextSources') return;
     const plan = imageFollowUpPlan(follow);
     if (plan.clearSourceError) ai.clearSourceError();
     if (plan.resetConfirmation) setConfirmedFor(null);
@@ -91,9 +145,9 @@ export function SizeChartDraftPanel({ ai, images, templateId, reviewing, busy, o
           AI 초안 (선택)
         </h2>
         <p className="mt-1 text-xs text-muted-fg">
-          기존 상세 설명 · 다른 표의 치수 부분을 붙여넣거나, 이 상품에 올린 사이즈표 이미지를 고르면
-          고른 템플릿 항목에 맞춘 초안을 만듭니다. 초안은 표에 불러와 검토하고 적용하기 전까지
-          스토어에 보이지 않습니다.
+          상품 설명에서 찾은 표를 고르거나 다른 표의 치수 부분을 붙여넣거나, 이 상품에 올린 사이즈표
+          이미지를 고르면 고른 템플릿 항목에 맞춘 초안을 만듭니다. 초안은 표에 불러와 검토하고
+          적용하기 전까지 스토어에 보이지 않습니다.
         </p>
       </div>
 
@@ -191,6 +245,28 @@ export function SizeChartDraftPanel({ ai, images, templateId, reviewing, busy, o
 
           {mode === 'TEXT' && (
             <>
+              {showSources ? (
+                <fieldset className="flex min-w-0 flex-col gap-2">
+                  <legend className="text-sm font-medium">상품 본문에서 고르기</legend>
+                  <TextSourceOptions
+                    state={textSources.state}
+                    name={`${id}-text-source`}
+                    selectedId={picked?.sourceId ?? null}
+                    onPick={pick}
+                    onReload={() => void textSources.load()}
+                    disabled={ai.submitting || busy}
+                  />
+                </fieldset>
+              ) : (
+                <Button
+                  variant="secondary"
+                  className="h-8 self-start px-3"
+                  disabled={ai.submitting || busy}
+                  onClick={openSources}
+                >
+                  상품 본문에서 고르기
+                </Button>
+              )}
               <label htmlFor={`${id}-source`} className="text-sm font-medium">
                 치수 텍스트
               </label>
@@ -203,12 +279,17 @@ export function SizeChartDraftPanel({ ai, images, templateId, reviewing, busy, o
                 aria-invalid={ai.sourceError !== null || tooLong || undefined}
                 aria-describedby={`${id}-source-help${ai.sourceError ? ` ${id}-source-error` : ''}`}
                 onChange={(event) => {
-                  setSourceText(event.currentTarget.value);
+                  const next = event.currentTarget.value;
+                  setSourceText(next);
+                  // 고른 표를 고치면 더는 그 표가 아니다 — 출처 없이 직접 입력으로 보낸다
+                  setPicked(pickAfterEdit(picked, next));
                   ai.clearSourceError();
                 }}
                 className="rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none focus:ring-2 focus:ring-primary"
               />
               <p id={`${id}-source-help`} className="text-xs text-muted-fg">
+                {picked &&
+                  `고른 표(${sourceLabel(picked.sourceId)})를 그대로 보냅니다. 고치면 직접 입력으로 보냅니다. `}
                 {sourceText.length.toLocaleString('ko-KR')} /{' '}
                 {SOURCE_TEXT_MAX.toLocaleString('ko-KR')}
                 자. 이름 · 연락처 · 주소 같은 문장은 넣지 마세요(서버가 거절합니다).

@@ -55,6 +55,7 @@ import {
 import { SizeChartDraftPanel } from './SizeChartDraftPanel';
 import { useSizeChartDraft } from './useSizeChartDraft';
 import { useSizeChartImageSources } from './useSizeChartImageSources';
+import { useTextSources } from './useTextSources';
 
 /** 템플릿 고르기 목록은 한 번에 최대치(100)를 읽는다. 넘으면 최신 100개만 보인다고 알린다 */
 const TEMPLATE_PAGE_SIZE = 100;
@@ -102,6 +103,7 @@ export function SizeChartEditor({ productId }: { productId: string }) {
   const onDenied = useCallback((denied: AccessDenied) => setStatus({ kind: 'denied', denied }), []);
   const ai = useSizeChartDraft(productId, onDenied);
   const images = useSizeChartImageSources(productId, onDenied);
+  const textSources = useTextSources(onDenied);
 
   // 상태는 응답 콜백에서만 바꾼다 — 마운트 effect 가 부른다
   const load = useCallback(
@@ -472,6 +474,10 @@ export function SizeChartEditor({ productId }: { productId: string }) {
         <SizeChartDraftPanel
           ai={ai}
           images={images}
+          textSources={{
+            state: textSources.stateOf(productId),
+            load: () => textSources.load(productId),
+          }}
           templateId={form.templateId}
           reviewing={review !== null && review.draft.draftId === ai.draft?.draftId}
           busy={saving || switching}

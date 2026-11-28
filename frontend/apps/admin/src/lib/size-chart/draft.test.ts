@@ -29,6 +29,7 @@ import {
   type SizeChartDraft,
 } from './draft';
 import { IMAGE_CHANGED, IMAGE_FORMAT, IMAGE_INPUT_CLOSED } from './draft-image';
+import { TEXT_SOURCE_CHANGED } from './text-source';
 
 const apiError = (
   kind: ApiErrorKind,
@@ -114,6 +115,25 @@ describe('keyFor', () => {
     expect(keyFor(first, '5', text('  S 50\n'), create)).toBe(first);
     expect(keyFor(first, '5', text('S 51'), create).key).not.toBe(first.key);
     expect(keyFor(first, '6', text('S 50'), create).key).not.toBe(first.key);
+  });
+
+  it('본문 표 출처는 키에 넣지 않는다 — 고른 표와 같은 텍스트의 직접 입력은 같은 키다(BE 멱등 해시도 텍스트만 본다)', () => {
+    const picked = keyFor(
+      null,
+      '5',
+      {
+        mode: 'TEXT',
+        sourceText: 'S 50\nM 52',
+        selection: { sourceId: 'TEXT-KO-1', bodyHash: 'a'.repeat(64) },
+      },
+      create,
+    );
+    expect(
+      keyFor(picked, '5', { mode: 'TEXT', sourceText: 'S 50\nM 52', selection: null }, create),
+    ).toBe(picked);
+    expect(
+      keyFor(picked, '5', { mode: 'TEXT', sourceText: 'S 50\nM 53', selection: null }, create).key,
+    ).not.toBe(picked.key);
   });
 });
 
@@ -229,6 +249,20 @@ describe('draftCreateFailure', () => {
       message: DRAFT_REGISTRATION_UNKNOWN,
     });
     expect(draftCreateFailure(apiError('unknownOutcome', 504, null)).kind).toBe('retry');
+  });
+
+  it('고른 본문 표가 그사이 바뀌었으면(017 · 선택 정보 119) 후보를 다시 읽게 한다', () => {
+    expect(draftCreateFailure(apiError('conflict', 409, 'SIZE_CHART_DRAFT_017'))).toEqual({
+      kind: 'textSource',
+      message: TEXT_SOURCE_CHANGED,
+    });
+    expect(
+      draftCreateFailure(
+        apiError('validation', 400, 'COMMON_001', [
+          { field: 'textSelection.bodyHash', code: 'SIZE_CHART_DRAFT_119', message: '원문' },
+        ]),
+      ).kind,
+    ).toBe('textSource');
   });
 
   it('401 은 입력을 지키고 다시 로그인을 안내한다. 403 은 권한 안내', () => {

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { SizeChartDraft } from '@/lib/size-chart/draft';
-import { SizeChartDraftPanel } from './SizeChartDraftPanel';
+import { SizeChartDraftPanel, type ProductTextSources } from './SizeChartDraftPanel';
 import type { SizeChartDraftState } from './useSizeChartDraft';
 import type { SizeChartImageSourcesState } from './useSizeChartImageSources';
 
@@ -63,11 +63,14 @@ function imagesState(
   };
 }
 
+const IDLE_TEXT_SOURCES: ProductTextSources = { state: { status: 'idle' }, load: async () => null };
+
 const render = (ai: SizeChartDraftState, templateId: string | null = '5', reviewing = false) =>
   renderToStaticMarkup(
     <SizeChartDraftPanel
       ai={ai}
       images={imagesState()}
+      textSources={IDLE_TEXT_SOURCES}
       templateId={templateId}
       reviewing={reviewing}
       busy={false}
@@ -86,6 +89,9 @@ describe('SizeChartDraftPanel', () => {
     expect(html).toContain('상품 이미지');
     expect(html).toMatch(/<input(?=[^>]*value="TEXT")(?=[^>]*checked="")[^>]*>/);
     expect(html).not.toContain('이미지 목록을 불러오는 중');
+    // 상품 본문 후보는 고르기를 누를 때 읽는다 — 처음에는 버튼만 있다
+    expect(html).toContain('상품 본문에서 고르기');
+    expect(html).not.toContain('설명에서 찾은 표입니다');
   });
 
   it('생성 중이면 서버 상태 이름 · 작업 진행 링크 · 결과 확인을 보이고 입력칸은 숨긴다', () => {
