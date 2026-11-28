@@ -2,7 +2,6 @@ package com.commercefoundry.domainlayer.order.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.order.support.OrderPaymentConsumerContract;
 import com.commercefoundry.domainlayer.order.application.command.PaymentApprovalCommand;
-import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
@@ -90,7 +89,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
     private static final AtomicLong IDS = new AtomicLong(70_000_000);
     @MockitoSpyBean OrderPaymentRepositoryAdapter paymentWrites;
-    @MockitoSpyBean OrderPaymentProcessor spiedProcessor;
     @Autowired PaymentRestorationSweepProcessor sweepProcessor;
 
     @ParameterizedTest
@@ -342,11 +340,8 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
         assertThat(processor.prepareConfirmation(verified(command), reservation, command.eventId())).isTrue();
         long claim = workLedger.findByReservationId(reservation).orElseThrow().claimId();
         jdbc.update("update orders.orders set status='CANCELED',version=version+1 where id=?", command.orderId());
-        doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN)).when(stock).release(reservation, command.orderId());
-        OrderPaymentProcessor target = AopTestUtils.getUltimateTargetObject(spiedProcessor);
-        doReturn(true).when(target).canDeferProbeToSweep();
-
-        facade.approve(command);
+        // 스윕이 켜진 Facade 가 프로브 503 뒤에 하는 일 — 확정 없음으로 반영한다(분기 자체는 OrderPaymentEventFacadeTest).
+        assertThat(processor.complete(command, verified(command), null)).isEmpty();
         facade.approve(command); // 재전달은 inbox 로 끝난다
 
         OrderPayment rejected = payments.findByPaymentId(command.paymentId()).orElseThrow();
@@ -356,8 +351,7 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
         var waiting = workLedger.findByClaimId(claim).orElseThrow();
         assertThat(waiting.origin().name()).isEqualTo("CONFIRMATION_ATTEMPT");
         assertThat(waiting.status().name()).isEqualTo("RESTORE_PENDING");
-        verify(stock, times(1)).release(reservation, command.orderId());
-        verifyNoInteractions(restorations);
+        verifyNoInteractions(stock, restorations);
 
         // product 회복 — 스윕이 버려진 확정으로 바꾼 뒤 같은 클레임으로 복원한다. 회신은 더 나가지 않는다.
         doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservation, command.orderId());
