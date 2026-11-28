@@ -22,6 +22,11 @@ public record OrderStatusHistory(
     /** 결제 후 취소의 환불이 확정됐다 — 취소 요청 → 취소 완료 (#16 PR-2). {@link #cancellationRefunded} 로 남긴다. */
     public static final String CANCELLATION_REFUNDED = "CANCELLATION_REFUNDED";
     /**
+     * 결제 후 부분 취소의 환불이 확정돼 남은 수량으로 돌아갔다 — 취소 요청 → 결제 완료 (#684, {@link Order#settleCancellation}). 주체 {@code SERVICE},
+     * {@link #cancellationSettled} 로 남긴다. 마지막 수량까지 취소돼 취소 완료로 가면 {@link #CANCELLATION_REFUNDED} 다.
+     */
+    public static final String PARTIAL_CANCELLATION_REFUNDED = "PARTIAL_CANCELLATION_REFUNDED";
+    /**
      * 반품 환불이 기록되어 주문을 정리했다 — 반품 요청 → 반품 완료 · 배송 완료 (#17 B2a, {@link Order#settleReturn}). 주체 {@code SERVICE},
      * {@link #changedByService} 로 남긴다 — 환불 호출은 order-service 의 파이프라인(승인 직후 · 재시도 스케줄러)이 한다.
      */
@@ -127,6 +132,22 @@ public record OrderStatusHistory(
             throw new IllegalArgumentException("환불 완료 이력은 저장된 취소 요청 주문에서만 만듭니다: orderId=" + order.id() + ", status=" + order.status());
         }
         return new OrderStatusHistory(id, order.id(), OrderStatus.CANCEL_REQUESTED, OrderStatus.CANCELED, StatusChangedBy.SERVICE, null, CANCELLATION_REFUNDED);
+    }
+
+    /**
+     * 취소 정리가 상태를 바꿨다 (#684, {@link Order#settleCancellation}) — 주체 {@code SERVICE}. 취소 완료로 가면 {@link #CANCELLATION_REFUNDED}, 결제 완료로 돌아가면
+     * {@link #PARTIAL_CANCELLATION_REFUNDED} 다. {@code before} 는 전이 전(취소 요청), {@code after} 는 전이 뒤 주문이다 — 상태가 그대로인 재시도는 이력을 남기지 않는다.
+     *
+     * @throws IllegalArgumentException 저장된 같은 주문의 취소 요청 → 취소 완료 · 결제 완료가 아닐 때
+     */
+    public static OrderStatusHistory cancellationSettled(long id, Order before, Order after) {
+        if (before.isNew() || before.id() != after.id() || before.status() != OrderStatus.CANCEL_REQUESTED
+            || (after.status() != OrderStatus.CANCELED && after.status() != OrderStatus.PAID)) {
+            throw new IllegalArgumentException("취소 정리 이력은 저장된 같은 주문의 취소 요청 → 취소 완료 · 결제 완료에서만 만듭니다: orderId=%d, %s → %s"
+                .formatted(before.id(), before.status(), after.status()));
+        }
+        String reason = after.status() == OrderStatus.CANCELED ? CANCELLATION_REFUNDED : PARTIAL_CANCELLATION_REFUNDED;
+        return new OrderStatusHistory(id, before.id(), OrderStatus.CANCEL_REQUESTED, after.status(), StatusChangedBy.SERVICE, null, reason);
     }
 
     @Override

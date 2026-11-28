@@ -22,7 +22,7 @@ class OrderStatusTransitionTest {
         Map.entry(OrderStatus.SHIPPING, EnumSet.of(OrderStatus.DELIVERED)),
         Map.entry(OrderStatus.DELIVERED, EnumSet.of(OrderStatus.PURCHASE_CONFIRMED, OrderStatus.RETURN_REQUESTED)),
         Map.entry(OrderStatus.PURCHASE_CONFIRMED, EnumSet.noneOf(OrderStatus.class)),
-        Map.entry(OrderStatus.CANCEL_REQUESTED, EnumSet.of(OrderStatus.CANCELED)),
+        Map.entry(OrderStatus.CANCEL_REQUESTED, EnumSet.of(OrderStatus.CANCELED, OrderStatus.PAID)),
         Map.entry(OrderStatus.CANCELED, EnumSet.noneOf(OrderStatus.class)),
         Map.entry(OrderStatus.RETURN_REQUESTED, EnumSet.of(OrderStatus.RETURNED, OrderStatus.DELIVERED)),
         Map.entry(OrderStatus.RETURNED, EnumSet.noneOf(OrderStatus.class)));
@@ -35,6 +35,13 @@ class OrderStatusTransitionTest {
             assertThat(from.canTransitionTo(to)).as("%s → %s", from, to).isEqualTo(EXPECTED.get(from).contains(to));
         }
         assertThat(from.nextStatuses()).containsExactlyInAnyOrderElementsOf(EXPECTED.get(from));
+    }
+
+    @ParameterizedTest
+    @EnumSource(OrderStatus.class)
+    @DisplayName("부분 취소 접수는 결제 완료에서만이다 — 제작 중 · 상품 준비중은 전체 취소만 받는다 (#684)")
+    void acceptsPartialCancellationOnlyWhenPaid(OrderStatus status) {
+        assertThat(status.acceptsPartialCancellation()).isEqualTo(status == OrderStatus.PAID);
     }
 
     @Test

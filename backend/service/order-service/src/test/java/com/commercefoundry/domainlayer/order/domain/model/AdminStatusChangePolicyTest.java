@@ -32,6 +32,7 @@ class AdminStatusChangePolicyTest {
         "PREPARING, SHIPPING, NOT_MANUAL",
         "PAID, CANCEL_REQUESTED, NOT_MANUAL",
         "CANCEL_REQUESTED, CANCELED, NOT_MANUAL",
+        "CANCEL_REQUESTED, PAID, NOT_MANUAL",
         "DELIVERED, PURCHASE_CONFIRMED, NOT_MANUAL",
         "RETURN_REQUESTED, RETURNED, NOT_MANUAL",
         "PENDING_PAYMENT, PREPARING, NOT_IN_TABLE",
@@ -50,6 +51,17 @@ class AdminStatusChangePolicyTest {
         assertThat(AdminStatusChangePolicy.manualTargets(order(OrderStatus.PAID, true))).containsExactlyInAnyOrder(OrderStatus.MAKING, OrderStatus.PREPARING);
         assertThat(AdminStatusChangePolicy.manualTargets(order(OrderStatus.PAID, false))).containsExactly(OrderStatus.PREPARING);
         assertThat(AdminStatusChangePolicy.manualTargets(order(OrderStatus.PENDING_PAYMENT, false))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("취소 요청 → 결제 완료(부분 취소 정리, #684)는 표에 있지만 어드민 화면에 나오지 않고, 도메인 changeStatus 도 거절한다 — settleCancellation 만 한다")
+    void partialCancellationSettlementIsNotManual() {
+        Order requested = order(OrderStatus.CANCEL_REQUESTED, true);
+
+        assertThat(OrderStatus.CANCEL_REQUESTED.canTransitionTo(OrderStatus.PAID)).isTrue();
+        assertThat(AdminStatusChangePolicy.decide(requested, OrderStatus.PAID)).isEqualTo(Decision.NOT_MANUAL);
+        assertThat(AdminStatusChangePolicy.manualTargets(requested)).isEmpty();
+        assertThatThrownBy(() -> requested.changeStatus(OrderStatus.PAID)).isInstanceOf(OrderStatusTransitionException.class);
     }
 
     @Test

@@ -115,12 +115,14 @@ public record Order(
      * 결제 전 취소(결제 대기 → 취소 완료)는 이 메서드로 하지 않는다 — 재고 해제 이벤트가 따라가야 해 {@link #cancelBeforePayment()} 를 쓴다(#16).
      * 출고(배송 중) · 배송 완료도 이 메서드로 하지 않는다 — 시각을 함께 남겨야 해 {@link #ship(Instant)} · {@link #deliver(Instant)} 를 쓴다(#18).
      * 반품 요청 → 배송 완료 복귀도 마찬가지로 {@link #settleReturn(ReturnRefundPolicy.ReturnOutcome)} 만 한다(#17 B1).
+     * 취소 요청 → 결제 완료 복귀(부분 취소 정리)도 {@link #settleCancellation(CancellationRefundPolicy.CancellationOutcome)} 만 한다(#684).
      *
-     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문 · 결제 전 취소 · 출고 · 배송 완료
+     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문 · 결제 전 취소 · 출고 · 배송 완료 · 취소 요청에서 결제 완료
      */
     public Order changeStatus(OrderStatus next) {
         Objects.requireNonNull(next, "next");
         if (isNew() || (status == OrderStatus.PENDING_PAYMENT && next == OrderStatus.CANCELED)
+            || (status == OrderStatus.CANCEL_REQUESTED && next == OrderStatus.PAID)
             || next == OrderStatus.SHIPPING || next == OrderStatus.DELIVERED) {
             throw new OrderStatusTransitionException(status, next);
         }
@@ -267,6 +269,28 @@ public record Order(
             throw new OrderStatusTransitionException(status, OrderStatus.CANCELED);
         }
         return transitionTo(OrderStatus.CANCELED);
+    }
+
+    /**
+     * 취소 정리 (#684) — 취소 요청 주문을 {@link CancellationRefundPolicy#outcome} 이 판정한 상태로 바꾼다. 환불이 기록된 취소 수량이 모든 주문 수량이면 취소 완료,
+     * 열린 취소 없이 일부만이면 결제 완료로 돌아가고(부분 취소 — 남은 수량을 출고한다), 열린 취소가 남았으면 취소 요청에 머문다. 이미 그 상태면 바꾸지 않은 이 값을
+     * 돌려준다 — {@link #completeCancellation()} 과 같이 확정 반영 재시도가 안전하다. 목표는 정책 결과로만 받는다 — 주문은 클레임을 읽지 않는다.
+     *
+     * <p>취소 요청 → 결제 완료 전이는 이 메서드만 한다 — {@link #changeStatus} 는 거절하고, 어드민 직접 전이({@link AdminStatusChangePolicy})에도 없다.
+     * 지금은 부르는 곳이 없다 — 결제 후 취소 엔진(#684 PR-2)이 {@link #completeCancellation()} 대신 부른다.
+     *
+     * @throws OrderStatusTransitionException 취소 요청이 아닌 상태에서의 전이 · 저장 전 주문
+     */
+    public Order settleCancellation(CancellationRefundPolicy.CancellationOutcome outcome) {
+        Objects.requireNonNull(outcome, "outcome");
+        OrderStatus next = outcome.getOrderStatus();
+        if (status == next) {
+            return this;
+        }
+        if (isNew() || status != OrderStatus.CANCEL_REQUESTED) {
+            throw new OrderStatusTransitionException(status, next);
+        }
+        return transitionTo(next);
     }
 
     /** 결제 전 취소({@link #cancelBeforePayment()})를 할 수 있는가 — 결제 대기만이다(#16 PR-1). */

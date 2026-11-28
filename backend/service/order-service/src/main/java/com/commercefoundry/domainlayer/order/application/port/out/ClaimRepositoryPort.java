@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.application.port.out;
 
 import com.commercefoundry.domainlayer.order.domain.model.Claim;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +26,23 @@ public interface ClaimRepositoryPort {
      * 이중 환불이 될 수 있다. 취소 클레임은 넣지 않는다.
      */
     Map<Long, Long> sumRequestedReturnQuantities(long orderId);
+
+    /**
+     * 한 주문에서 이미 취소에 잡힌 항목별 수량 (#684) — {@link Claim#reservesCancellationQuantity()} 인 취소 클레임(거절만 뺀 전부)의 항목 수량 합이다.
+     * 열린 취소(환불 대기 · 환불 실패)도 넣는다 — 환불이 나갈 수 있는 수량을 빼면 같은 수량을 다시 취소 접수해 이중 환불이 된다. 반품 클레임은 넣지 않는다.
+     * 부분 취소 접수는 주문 잠금 안에서 읽는다. 없으면 빈 맵.
+     *
+     * @return 주문 항목 아이디 → 수량
+     */
+    Map<Long, Long> sumCanceledQuantities(long orderId);
+
+    /**
+     * 여러 주문의 취소 수량을 한 질의로 읽는다 (#684, 피킹 잔여 수량 · 어드민 상세용) — 규칙은 {@link #sumCanceledQuantities(long)} 과 같다. 취소가 없는 주문은
+     * 결과에 없다. 묶음 크기(IN 절 길이)는 부르는 쪽이 페이지 크기로 제한한다.
+     *
+     * @return 주문 아이디 → (주문 항목 아이디 → 수량). 빈 입력이면 질의 없이 빈 맵
+     */
+    Map<Long, Map<Long, Long>> sumCanceledQuantitiesByOrderIds(Collection<Long> orderIds);
 
     /**
      * 호출자의 주문 잠금 트랜잭션에 참여한다.

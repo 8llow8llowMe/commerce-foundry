@@ -3,13 +3,16 @@ package com.commercefoundry.domainlayer.order.domain.model;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.shared.commerce.ShippingScope;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 
 /**
- * 결제 후 취소의 환불액 산식 (#16 PR-2, {@code order-flow-guide.md} §5 · §2 "클레임의 배송비 재부과는 주문 스냅숏으로") — 현재 배송비 정책이 아니라
- * 주문 시점 스냅숏({@link OrderQuote} · {@link ShippingFeeQuote})만 쓴다.
+ * 결제 후 취소의 환불액 산식과 취소 정리 판정 (#16 PR-2 · #684, {@code order-flow-guide.md} §1-4 · §5 · §2 "클레임의 배송비 재부과는 주문 스냅숏으로") — 현재 배송비 정책이
+ * 아니라 주문 시점 스냅숏({@link OrderQuote} · {@link ShippingFeeQuote})만 쓴다.
  *
  * <ul>
  *   <li>{@code refund = due(취소 전 남은 수량) − due(취소 뒤 남은 수량)}, {@code due(S) = items(S) + ship(S)}, {@code ship(∅) = 0}</li>
@@ -19,8 +22,12 @@ import java.util.Objects;
  *   <li>도서산간 추가 배송비는 스냅숏 배송비에 이미 들어 있어 따로 다시 부과하지 않는다</li>
  * </ul>
  *
- * <p>부분 취소를 순서대로 다 하면 환불 합은 결제 총액과 같다(망원 합). 소액 항목을 취소해 재부과액이 그 항목 금액보다 크면 결과가 음수다 —
- * 이번(PR-2a)은 계산만 하고 {@link Refund#isShortfall()} 로 드러낸다. 음수를 어떻게 다룰지(거절 · 0 처리)는 부분 취소 API(PR-2b)에서 정한다.
+ * <p>환불 내역({@link #breakdown})은 같은 산식을 나눈 값이다 — {@code itemsAmount = items(before) − items(after)}, {@code delta = ship(after) − ship(before)} 이고
+ * {@code delta > 0} 이면 재부과, {@code delta < 0} 이면 배송비 환불이다. 내역 합({@code itemsAmount + shippingFeeRefund − shippingFeeRecharge})은 늘 {@link #refund} 와 같다.
+ *
+ * <p>부분 취소를 순서대로 다 하면 환불 합은 결제 총액과 같다(망원 합). 소액 항목을 취소해 재부과액이 그 항목 금액 이상이면 결과가 0 이하다 — 계산은 그대로 하고
+ * {@link Refund#isPayable()} · {@link RefundBreakdown#isPayable()} 로 드러낸다. <b>0 이하 환불의 부분 취소는 접수하지 않는다</b>(사용자 결정, 고객 API #684 PR-4 에서 409 —
+ * 반품의 "0 이하면 승인 거부"와 같다). 0 으로 깎아 받거나 고객에게 추가 결제를 받지 않는다.
  */
 public final class CancellationRefundPolicy {
 
@@ -34,13 +41,22 @@ public final class CancellationRefundPolicy {
     }
 
     /**
-     * 부분 취소 환불액.
+     * 부분 취소 환불액 — {@link #breakdown} 의 합이다.
      *
      * @param alreadyCanceled 이미 취소된 주문 항목별 수량 (주문 항목 아이디 → 수량). 없으면 빈 맵
      * @param toCancel 이번에 취소할 주문 항목별 수량 (1 이상)
      * @throws IllegalArgumentException 주문에 없는 항목 · 0 이하 수량 · 원래 수량을 넘는 누적 취소
      */
     public static Refund refund(Order order, Map<Long, Integer> alreadyCanceled, Map<Long, Integer> toCancel) {
+        return breakdown(order, alreadyCanceled, toCancel).toRefund();
+    }
+
+    /**
+     * 부분 취소 환불 내역 (#684) — 취소한 상품 금액 · 돌려주는 배송비 · 다시 받는 배송비로 나눈다. 인자 규칙은 {@link #refund} 와 같다.
+     *
+     * @throws IllegalArgumentException 주문에 없는 항목 · 0 이하 수량 · 원래 수량을 넘는 누적 취소
+     */
+    public static RefundBreakdown breakdown(Order order, Map<Long, Integer> alreadyCanceled, Map<Long, Integer> toCancel) {
         Objects.requireNonNull(order, "order");
         Objects.requireNonNull(alreadyCanceled, "alreadyCanceled");
         Objects.requireNonNull(toCancel, "toCancel");
@@ -63,11 +79,79 @@ public final class CancellationRefundPolicy {
                 throw new IllegalArgumentException("누적 취소 수량이 주문 수량을 넘습니다: orderItemId=" + itemId);
             }
         }
-        return new Refund(Math.subtractExact(due(quote, before), due(quote, after)), quote.currency());
+        Due dueBefore = dueOf(quote, before);
+        Due dueAfter = dueOf(quote, after);
+        long delta = Math.subtractExact(dueAfter.shipping(), dueBefore.shipping());
+        return new RefundBreakdown(Math.subtractExact(dueBefore.items(), dueAfter.items()), Math.max(0, -delta), Math.max(0, delta), quote.currency());
+    }
+
+    /**
+     * 취소 클레임으로 본 주문의 다음 상태 (순수 판정, #684) — 환불이 기록된 취소({@link Claim#isSettledCancellation()})의 항목 수량 합이 모든 주문 항목의 수량과
+     * 같으면 취소 완료, 아니고 열린 취소({@link Claim#isOpenCancellation()})가 있으면 취소 요청 유지, 그 밖(열린 취소 없이 일부만 환불)이면 결제 완료로 돌아간다.
+     * 열린 취소 · 거절된 취소 · 반품 클레임은 합에 넣지 않는다. {@link Order#settleCancellation} 은 이 결과만 받는다.
+     *
+     * <p>데이터 이상은 판정하지 않는다(부르는 쪽이 fail-closed 로 주문을 취소 요청에 둔다) — 취소에 잡힌 수량(거절 밖 전부)이 주문 수량을 넘거나, 주문에 없는 항목을
+     * 취소했거나, 열린 취소도 환불이 기록된 취소도 없을 때다(전부 거절된 취소는 취소 거절 전이 A4 몫이라 원래 상태를 이 판정이 알 수 없다).
+     *
+     * @param claims 이 주문의 클레임 전부
+     * @throws IllegalArgumentException 다른 주문의 클레임
+     * @throws IllegalStateException 위 데이터 이상
+     */
+    public static CancellationOutcome outcome(Order order, List<Claim> claims) {
+        Objects.requireNonNull(order, "order");
+        Objects.requireNonNull(claims, "claims");
+        Map<Long, Integer> reserved = new HashMap<>();
+        Map<Long, Integer> settled = new HashMap<>();
+        boolean open = false;
+        for (Claim claim : claims) {
+            if (claim.orderId() != order.id()) {
+                throw new IllegalArgumentException("다른 주문의 클레임입니다: claimId=" + claim.id());
+            }
+            if (!claim.reservesCancellationQuantity()) {
+                continue;
+            }
+            for (ClaimItem item : claim.items()) {
+                if (!order.itemIds().contains(item.orderItemId())) {
+                    throw new IllegalStateException("주문에 없는 항목의 취소입니다: claimId=%d, orderItemId=%d".formatted(claim.id(), item.orderItemId()));
+                }
+                reserved.merge(item.orderItemId(), item.quantity(), Integer::sum);
+                if (claim.isSettledCancellation()) {
+                    settled.merge(item.orderItemId(), item.quantity(), Integer::sum);
+                }
+            }
+            open |= claim.isOpenCancellation();
+        }
+        boolean all = true;
+        for (int index = 0; index < order.itemIds().size(); index++) {
+            long itemId = order.itemIds().get(index);
+            int ordered = order.quote().lines().get(index).quantity();
+            if (reserved.getOrDefault(itemId, 0) > ordered) {
+                throw new IllegalStateException("취소에 잡힌 수량이 주문 수량을 넘습니다: orderItemId=" + itemId);
+            }
+            all &= settled.getOrDefault(itemId, 0) == ordered;
+        }
+        if (all) {
+            return CancellationOutcome.CANCELED;
+        }
+        if (open) {
+            return CancellationOutcome.STILL_REQUESTED;
+        }
+        if (settled.isEmpty()) {
+            throw new IllegalStateException("환불이 기록된 취소도 열린 취소도 없는 주문은 취소 정리를 판정하지 않습니다: orderId=" + order.id());
+        }
+        return CancellationOutcome.PARTIALLY_CANCELED;
     }
 
     /** 남은 수량 {@code remaining}(줄 순서) 으로 받아야 할 금액. 원주문 그대로면 결제 총액, 전부 취소면 0 이다. */
     static long due(OrderQuote quote, int[] remaining) {
+        return dueOf(quote, remaining).total();
+    }
+
+    /**
+     * 남은 수량으로 받아야 할 금액을 상품 · 배송비로 나눈다 — {@code due = items + shipping} 이 모든 수량에서 성립하게 원주문의 배송비는 {@code 총액 − 상품 합계},
+     * 전부 취소면 0 으로 둔다. 원주문은 다른 판정보다 먼저 본다(총액이 정본이다).
+     */
+    private static Due dueOf(OrderQuote quote, int[] remaining) {
         List<OrderQuoteLine> lines = quote.lines();
         boolean original = true;
         boolean empty = true;
@@ -79,12 +163,12 @@ public final class CancellationRefundPolicy {
             items = Math.addExact(items, Math.multiplyExact(line.unitPrice().amount(), (long) remaining[index]));
         }
         if (original) {
-            return quote.totalAmount().amount();
+            return new Due(items, Math.subtractExact(quote.totalAmount().amount(), items));
         }
         if (empty) {
-            return 0;
+            return new Due(0, 0);
         }
-        return Math.addExact(items, shipping(quote.shippingFeeQuote(), items));
+        return new Due(items, shipping(quote.shippingFeeQuote(), items));
     }
 
     private static long shipping(ShippingFeeQuote fee, long items) {
@@ -103,10 +187,18 @@ public final class CancellationRefundPolicy {
         return quote.lines().stream().mapToInt(OrderQuoteLine::quantity).toArray();
     }
 
+    /** 남은 수량으로 받아야 할 상품 금액 · 배송비 (최소 단위). */
+    private record Due(long items, long shipping) {
+
+        long total() {
+            return Math.addExact(items, shipping);
+        }
+    }
+
     /**
-     * 계산한 환불액 — 최소 단위 정수 + 통화. 음수일 수 있어 {@link Money} 가 아니다.
+     * 계산한 환불액 — 최소 단위 정수 + 통화. 0 이하일 수 있어 {@link Money} 가 아니다.
      *
-     * @param amount 환불액(최소 단위). 음수면 재부과액이 취소 금액보다 크다
+     * @param amount 환불액(최소 단위). 0 이하면 재부과액이 취소 금액 이상이다
      */
     public record Refund(long amount, CurrencyCode currency) {
 
@@ -114,9 +206,14 @@ public final class CancellationRefundPolicy {
             Objects.requireNonNull(currency, "currency");
         }
 
-        /** 재부과액이 취소한 상품 금액보다 커 돌려줄 돈이 음수인가 — 처리 규칙은 PR-2b. */
+        /** 재부과액이 취소한 상품 금액보다 커 돌려줄 돈이 음수인가. 접수 판정은 {@link #isPayable()} 이다(0 도 접수하지 않는다). */
         public boolean isShortfall() {
             return amount < 0;
+        }
+
+        /** 돌려줄 돈이 있는가 — 0보다 크다. 0 이하면 부분 취소를 접수하지 않는다(#684 PR-4 409). */
+        public boolean isPayable() {
+            return amount > 0;
         }
 
         /** @throws IllegalStateException 음수 환불액 */
@@ -126,5 +223,51 @@ public final class CancellationRefundPolicy {
             }
             return Money.of(amount, currency);
         }
+    }
+
+    /**
+     * 부분 취소 환불 내역 (#684) — 고객 응답 · 미리보기가 보여 주는 나눔이다. 환불액 {@link #amount()} 은 {@link #refund} 와 같다.
+     *
+     * @param itemsAmount 이번에 취소한 상품 금액(단가 × 수량 합, 0 이상)
+     * @param shippingFeeRefund 돌려주는 배송비(0 이상) — 남은 주문의 배송비가 줄었을 때(마지막 수량까지 취소 등) 그 차이
+     * @param shippingFeeRecharge 다시 받는 배송비(0 이상) — 남은 상품 합계가 무료배송 기준 아래로 내려가 배송비가 늘었을 때 그 차이. 배송비 환불과 함께 0보다 클 수 없다
+     */
+    public record RefundBreakdown(long itemsAmount, long shippingFeeRefund, long shippingFeeRecharge, CurrencyCode currency) {
+
+        public RefundBreakdown {
+            Objects.requireNonNull(currency, "currency");
+            if (itemsAmount < 0 || shippingFeeRefund < 0 || shippingFeeRecharge < 0 || (shippingFeeRefund > 0 && shippingFeeRecharge > 0)) {
+                throw new IllegalArgumentException("환불 내역은 0 이상이고 배송비 환불 · 재부과 중 하나만 있습니다: %d, %d, %d"
+                    .formatted(itemsAmount, shippingFeeRefund, shippingFeeRecharge));
+            }
+        }
+
+        /** 환불액 = 상품 금액 + 배송비 환불 − 배송비 재부과. 0 이하일 수 있다. */
+        public long amount() {
+            return Math.subtractExact(Math.addExact(itemsAmount, shippingFeeRefund), shippingFeeRecharge);
+        }
+
+        /** 돌려줄 돈이 있는가 — 0보다 크다. 0 이하면 부분 취소를 접수하지 않는다(#684 PR-4 409). */
+        public boolean isPayable() {
+            return amount() > 0;
+        }
+
+        public Refund toRefund() {
+            return new Refund(amount(), currency);
+        }
+    }
+
+    /** 취소 정리 결과 — {@link #outcome} 이 정하고 {@link Order#settleCancellation} 이 받는다. 주문을 이 셋 밖의 상태로 보낼 수 없다. */
+    @Getter
+    @RequiredArgsConstructor
+    public enum CancellationOutcome {
+        /** 열린 취소(환불 대기 · 환불 실패)가 남아 취소 요청에 머문다 — 출고하지 않는다. */
+        STILL_REQUESTED(OrderStatus.CANCEL_REQUESTED),
+        /** 모든 주문 수량의 취소 환불이 기록됐다. */
+        CANCELED(OrderStatus.CANCELED),
+        /** 열린 취소 없이 일부 수량만 환불됐다 — 결제 완료로 돌아가 남은 수량을 출고한다. */
+        PARTIALLY_CANCELED(OrderStatus.PAID);
+
+        private final OrderStatus orderStatus;
     }
 }
