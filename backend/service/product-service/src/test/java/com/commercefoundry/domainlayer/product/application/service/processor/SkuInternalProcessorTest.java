@@ -2,40 +2,62 @@ package com.commercefoundry.domainlayer.product.application.service.processor;
 
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.commercefoundry.domainlayer.product.application.exception.PriceSourceSnapshotReadException;
 import com.commercefoundry.domainlayer.product.application.info.CustomOrderFieldDefinition;
 import com.commercefoundry.domainlayer.product.application.info.SkuInternalInfo;
 import com.commercefoundry.domainlayer.product.application.info.SkuOptionValueInfo;
+import com.commercefoundry.domainlayer.product.application.port.out.PriceSourceMetricsPort;
+import com.commercefoundry.domainlayer.product.application.port.out.PriceSourceSnapshotRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.PriceSourceSnapshotQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderInputType;
 import com.commercefoundry.domainlayer.product.domain.model.HsCode;
+import com.commercefoundry.domainlayer.product.domain.model.ProductCurrencyPrice;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
+import com.commercefoundry.domainlayer.product.domain.model.SkuCurrencyPrice;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
+import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.LongStream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 @ExtendWith(MockitoExtension.class)
 class SkuInternalProcessorTest {
@@ -59,6 +81,12 @@ class SkuInternalProcessorTest {
 
     @Mock
     private ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
+
+    @Mock
+    private PriceSourceSnapshotRepositoryPort priceSourceSnapshotRepositoryPort;
+
+    @Mock
+    private PriceSourceMetricsPort priceSourceMetricsPort;
 
     @Test
     @DisplayName("중복은 첫 등장 순서로 한 번만 조회하고, 응답은 요청 순서(중복 제거 후)다 — 포트가 돌려준 순서와 무관하다")
@@ -88,7 +116,8 @@ class SkuInternalProcessorTest {
         given(skuRepositoryPort.findAllByIds(List.of(99L))).willReturn(List.of());
 
         assertThat(processor(true).getSkus(List.of(99L))).isEmpty();
-        verifyNoInteractions(productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort, productCustomOrderFieldRepositoryPort);
+        verifyNoInteractions(productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort, productCustomOrderFieldRepositoryPort,
+            priceSourceSnapshotRepositoryPort, priceSourceMetricsPort);
     }
 
     @Test
@@ -138,6 +167,8 @@ class SkuInternalProcessorTest {
         assertThat(sku.saleStatus()).isEqualTo(SaleAvailability.ON_SALE);
         assertThat(sku.purchasable()).isTrue();
         assertThat(sku.maxQuantityPerOrder()).isEqualTo(10);
+        // LEGACY(기본)는 가격 원천 snapshot · 지표를 쓰지 않는다 — 가격은 legacy 컬럼 그대로다(#20 B4b)
+        verifyNoInteractions(priceSourceSnapshotRepositoryPort, priceSourceMetricsPort);
     }
 
     @Test
@@ -342,12 +373,218 @@ class SkuInternalProcessorTest {
         verify(stockRepositoryPort).findAllBySkuIds(List.of(1L, 2L));
         verify(productOptionRepositoryPort).findValuesByIds(Set.of(5011L));
         verify(productOptionRepositoryPort).findGroupsByIds(Set.of(COLOR));
+        verifyNoInteractions(priceSourceSnapshotRepositoryPort, priceSourceMetricsPort);
+    }
+
+    /**
+     * PRICE_BOOK(#20 B4b). 읽은 상품 · SKU 의 가격을 일부러 원천과 다르게 두어 응답이 snapshot 투영(가격행) 값을 쓰는지 본다 — 실제 경로에서는 같은 TX 의 한 시점이라 같다.
+     * 해석하지 못한 상품은 그 상품의 SKU 만 빠지고(D8), 운영자에게는 아이디 · 금액 없는 WARN 한 줄과 사유별 지표만 남는다.
+     */
+    @Nested
+    @DisplayName("getSkus — PRICE_BOOK")
+    class PriceBook {
+
+        private static final String FAILURE_MESSAGE = "서비스 간 SKU 조회 가격 원천을 사용할 수 없습니다";
+        private static final String EXCLUDED_LOG = "price source unresolved, products excluded from internal sku response. excludedProducts=%d, reasons=%s";
+        // 정상 7001 · 7004, drift 7002, SKU 가격행 누락 7003
+        private static final long OK = 7001L;
+        private static final long DRIFT = 7002L;
+        private static final long MISSING_ROW = 7003L;
+        private static final long OK_2 = 7004L;
+
+        private ListAppender<ILoggingEvent> events;
+
+        @BeforeEach
+        void captureLogs() {
+            events = new ListAppender<>();
+            events.start();
+            logger().addAppender(events);
+        }
+
+        @AfterEach
+        void releaseLogs() {
+            logger().detachAppender(events);
+            events.stop();
+        }
+
+        @Test
+        @DisplayName("정상 상품은 투영 가격, drift · 가격행 누락 상품은 SKU 가 빠지고 나머지는 요청 순서 그대로다 — 재고는 남은 SKU 로만 읽고, 지표는 사유별 건수다")
+        void excludesUnresolvedProductsAndUsesProjectedPrices() {
+            given(skuRepositoryPort.findAllByIds(List.of(105L, 102L, 101L, 104L, 103L))).willReturn(List.of(
+                ProductFixtures.sku(101, OK, "", 0, SaleStatus.ON_SALE),
+                ProductFixtures.sku(102, DRIFT, "", 0, SaleStatus.ON_SALE),
+                // 읽은 추가금(9)은 원천(5,000)과 다르다
+                ProductFixtures.sku(103, OK, "", 9, SaleStatus.ON_SALE),
+                ProductFixtures.sku(104, MISSING_ROW, "", 0, SaleStatus.ON_SALE),
+                ProductFixtures.sku(105, OK_2, "", 0, SaleStatus.ON_SALE)
+            ));
+            given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(OK, DRIFT, MISSING_ROW, OK_2))).willReturn(List.of(
+                ProductFixtures.product(OK).withPricing(Money.of(1, KRW), null),
+                ProductFixtures.product(DRIFT), ProductFixtures.product(MISSING_ROW), ProductFixtures.product(OK_2)
+            ));
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(OK, DRIFT, MISSING_ROW, OK_2))).willReturn(
+                new PriceSourceSnapshotQueryResult(List.of(OK, DRIFT, MISSING_ROW, OK_2),
+                    List.of(ProductFixtures.product(OK), ProductFixtures.product(DRIFT), ProductFixtures.product(MISSING_ROW), ProductFixtures.product(OK_2)),
+                    List.of(
+                        ProductFixtures.sku(101, OK, "", 0, SaleStatus.ON_SALE),
+                        ProductFixtures.sku(103, OK, "", 5_000, SaleStatus.ON_SALE),
+                        // 요청하지 않은 판매 중지 SKU 도 원천에는 있다
+                        ProductFixtures.sku(106, OK, "", 3_000, SaleStatus.STOP_SELLING),
+                        ProductFixtures.sku(102, DRIFT, "", 0, SaleStatus.ON_SALE),
+                        ProductFixtures.sku(104, MISSING_ROW, "", 0, SaleStatus.ON_SALE),
+                        ProductFixtures.sku(105, OK_2, "", 0, SaleStatus.ON_SALE)
+                    ),
+                    List.of(productPrice(1, OK, ProductFixtures.BASE_PRICE), productPrice(2, DRIFT, ProductFixtures.BASE_PRICE + 1),
+                        productPrice(3, MISSING_ROW, ProductFixtures.BASE_PRICE), productPrice(4, OK_2, ProductFixtures.BASE_PRICE)),
+                    // 104 의 SKU 가격행이 없다
+                    List.of(skuPrice(11, 101, 0), skuPrice(13, 103, 5_000), skuPrice(16, 106, 3_000), skuPrice(12, 102, 0), skuPrice(15, 105, 0))));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(101L, 103L, 105L))).willReturn(ProductFixtures.stocks(101, 103, 105));
+            givenNoOptions();
+
+            List<SkuInternalInfo> skus = priceBookProcessor().getSkus(List.of(105L, 102L, 101L, 104L, 103L));
+
+            assertThat(skus).extracting(SkuInternalInfo::skuId, SkuInternalInfo::salePrice, SkuInternalInfo::additionalPrice).containsExactly(
+                tuple(105L, Money.of(ProductFixtures.BASE_PRICE, KRW), Money.zero(KRW)),
+                tuple(101L, Money.of(ProductFixtures.BASE_PRICE, KRW), Money.zero(KRW)),
+                tuple(103L, Money.of(ProductFixtures.BASE_PRICE + 5_000, KRW), Money.of(5_000, KRW)));
+            assertThat(skus).allSatisfy(sku -> assertThat(sku.purchasable()).isTrue());
+            assertThat(skus.get(1).productName()).as("비가격 필드는 읽은 상품 그대로").isEqualTo("상품" + OK);
+            verify(priceSourceMetricsPort).recordExcludedProducts("INVALID_PRICE_BOOK", 1);
+            verify(priceSourceMetricsPort).recordExcludedProducts("LEGACY_DRIFT", 1);
+            verifyNoMoreInteractions(priceSourceMetricsPort);
+            assertSingleSanitizedWarn(EXCLUDED_LOG.formatted(2, "{INVALID_PRICE_BOOK=1, LEGACY_DRIFT=1}"));
+        }
+
+        @Test
+        @DisplayName("응답 SKU 가 투영에 없으면 그 상품도 해석 실패와 같게 뺀다")
+        void excludesProductWhoseSkuIsNotInProjection() {
+            given(skuRepositoryPort.findAllByIds(List.of(101L, 105L))).willReturn(List.of(
+                ProductFixtures.sku(101, OK, "", 0, SaleStatus.ON_SALE), ProductFixtures.sku(105, OK_2, "", 0, SaleStatus.ON_SALE)));
+            given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(OK, OK_2)))
+                .willReturn(List.of(ProductFixtures.product(OK), ProductFixtures.product(OK_2)));
+            // 원천의 7001 에는 SKU 103 만 있다
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(OK, OK_2))).willReturn(
+                new PriceSourceSnapshotQueryResult(List.of(OK, OK_2), List.of(ProductFixtures.product(OK), ProductFixtures.product(OK_2)),
+                    List.of(ProductFixtures.sku(103, OK, "", 0, SaleStatus.ON_SALE), ProductFixtures.sku(105, OK_2, "", 0, SaleStatus.ON_SALE)),
+                    List.of(productPrice(1, OK, ProductFixtures.BASE_PRICE), productPrice(4, OK_2, ProductFixtures.BASE_PRICE)),
+                    List.of(skuPrice(13, 103, 0), skuPrice(15, 105, 0))));
+            givenNoOptions();
+
+            assertThat(priceBookProcessor().getSkus(List.of(101L, 105L))).extracting(SkuInternalInfo::skuId).containsExactly(105L);
+            verify(priceSourceMetricsPort).recordExcludedProducts("SKU_NOT_IN_PROJECTION", 1);
+            verifyNoMoreInteractions(priceSourceMetricsPort);
+            assertSingleSanitizedWarn(EXCLUDED_LOG.formatted(1, "{SKU_NOT_IN_PROJECTION=1}"));
+        }
+
+        @Test
+        @DisplayName("묶음 구조 오류(다른 상품 소속 행)는 상품을 가를 수 없어 그 묶음의 상품을 모두 뺀다 — 500 이 아니다")
+        void structuralFailureExcludesTheWholeBatch() {
+            given(skuRepositoryPort.findAllByIds(List.of(101L, 105L))).willReturn(List.of(
+                ProductFixtures.sku(101, OK, "", 0, SaleStatus.ON_SALE), ProductFixtures.sku(105, OK_2, "", 0, SaleStatus.ON_SALE)));
+            given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(OK, OK_2)))
+                .willReturn(List.of(ProductFixtures.product(OK), ProductFixtures.product(OK_2)));
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(OK, OK_2))).willReturn(
+                new PriceSourceSnapshotQueryResult(List.of(OK, OK_2), List.of(ProductFixtures.product(OK), ProductFixtures.product(OK_2)),
+                    List.of(ProductFixtures.sku(101, OK, "", 0, SaleStatus.ON_SALE), ProductFixtures.sku(105, OK_2, "", 0, SaleStatus.ON_SALE)),
+                    List.of(productPrice(1, OK, ProductFixtures.BASE_PRICE), productPrice(4, OK_2, ProductFixtures.BASE_PRICE)),
+                    // 999 는 원천에 없는 SKU 다
+                    List.of(skuPrice(11, 101, 0), skuPrice(15, 105, 0), skuPrice(19, 999, 0))));
+
+            assertThat(priceBookProcessor().getSkus(List.of(101L, 105L))).isEmpty();
+            verify(priceSourceMetricsPort).recordExcludedProducts("FOREIGN_ROW", 2);
+            verifyNoMoreInteractions(priceSourceMetricsPort);
+            assertSingleSanitizedWarn(EXCLUDED_LOG.formatted(2, "{FOREIGN_ROW=2}"));
+        }
+
+        @ParameterizedTest(name = "{0}")
+        @EnumSource(PriceSourceSnapshotReadException.Reason.class)
+        @DisplayName("snapshot 읽기 자체가 실패하면 상품을 빼지 않고 고정 내부 오류(cause 없음)다 — 재고 · 옵션 · 지표에 닿지 않는다")
+        void snapshotReadFailureIsSanitizedInternalError(PriceSourceSnapshotReadException.Reason reason) {
+            given(skuRepositoryPort.findAllByIds(List.of(101L))).willReturn(List.of(ProductFixtures.sku(101, OK, "", 0, SaleStatus.ON_SALE)));
+            given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(OK))).willReturn(List.of(ProductFixtures.product(OK)));
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(OK))).willThrow(new PriceSourceSnapshotReadException(reason));
+
+            Throwable error = catchThrowable(() -> priceBookProcessor().getSkus(List.of(101L)));
+
+            assertThat(error).isExactlyInstanceOf(IllegalStateException.class).hasMessage(FAILURE_MESSAGE).hasNoCause();
+            assertThat(error.getSuppressed()).isEmpty();
+            verifyNoInteractions(stockRepositoryPort, productOptionRepositoryPort, productCustomOrderFieldRepositoryPort, priceSourceMetricsPort);
+            assertSingleSanitizedWarn("price source unavailable for internal sku lookup. reason=" + reason.name());
+        }
+
+        @Test
+        @DisplayName("응답 대상 상품이 20개를 넘으면 같은 TX 안에서 아이디 오름차순 20개씩 나눠 읽는다 — SKU 2000행 상한을 넘지 않게")
+        void readsSnapshotInChunksOfTwenty() {
+            List<Long> productIds = LongStream.rangeClosed(1, 51).boxed().toList();
+            List<Long> skuIds = productIds.stream().map(id -> 1_000 + id).toList();
+            given(skuRepositoryPort.findAllByIds(skuIds)).willReturn(productIds.stream().map(PriceBook::consistentSku).toList());
+            given(productRepositoryPort.findAllByIdsIncludingHidden(Set.copyOf(productIds)))
+                .willReturn(productIds.stream().map(id -> ProductFixtures.product(id)).toList());
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(anyList()))
+                .willAnswer(invocation -> consistentSnapshot(invocation.getArgument(0)));
+
+            List<SkuInternalInfo> skus = priceBookProcessor().getSkus(skuIds);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<Long>> chunks = ArgumentCaptor.forClass(List.class);
+            verify(priceSourceSnapshotRepositoryPort, times(3)).readByProductIdsInCurrentTransaction(chunks.capture());
+            assertThat(chunks.getAllValues()).containsExactly(productIds.subList(0, 20), productIds.subList(20, 40), productIds.subList(40, 51));
+            assertThat(skus).extracting(SkuInternalInfo::skuId).containsExactlyElementsOf(skuIds);
+            verifyNoInteractions(priceSourceMetricsPort);
+            assertThat(events.list).isEmpty();
+        }
+
+        /** 로그는 사유 이름 · 건수만 담은 WARN 한 줄이다 — 예외 첨부가 없고 상품 · SKU 아이디와 금액이 없다. */
+        private void assertSingleSanitizedWarn(String expectedMessage) {
+            assertThat(events.list).singleElement().satisfies(event -> {
+                assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                assertThat(event.getFormattedMessage()).isEqualTo(expectedMessage)
+                    .doesNotContain(String.valueOf(OK), String.valueOf(DRIFT), String.valueOf(MISSING_ROW), String.valueOf(OK_2))
+                    .doesNotContain("101", "102", "103", "104", "105", String.valueOf(ProductFixtures.BASE_PRICE));
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+        }
+
+        private Logger logger() {
+            return (Logger) LoggerFactory.getLogger(SkuInternalProcessor.class);
+        }
+
+        private SkuInternalProcessor priceBookProcessor() {
+            return processor(true, PriceSourceProperties.Mode.PRICE_BOOK);
+        }
+
+        private static ProductCurrencyPrice productPrice(long id, long productId, long saleAmount) {
+            return new ProductCurrencyPrice(id, productId, Money.of(saleAmount, KRW), Money.of(ProductFixtures.LIST_PRICE, KRW));
+        }
+
+        private static SkuCurrencyPrice skuPrice(long id, long skuId, long amount) {
+            return new SkuCurrencyPrice(id, skuId, Money.of(amount, KRW));
+        }
+
+        /** 상품마다 추가금 0 인 SKU 하나(아이디 1000 + 상품 아이디). */
+        private static Sku consistentSku(long productId) {
+            return ProductFixtures.sku(1_000 + productId, productId, "", 0, SaleStatus.ON_SALE);
+        }
+
+        /** 받은 상품들의 legacy 와 같은 값의 기준통화 가격행 — drift 가 없는 원천이다. */
+        private static PriceSourceSnapshotQueryResult consistentSnapshot(List<Long> productIds) {
+            return new PriceSourceSnapshotQueryResult(productIds,
+                productIds.stream().map(id -> ProductFixtures.product(id)).toList(),
+                productIds.stream().map(PriceBook::consistentSku).toList(),
+                productIds.stream().map(id -> productPrice(id, id, ProductFixtures.BASE_PRICE)).toList(),
+                productIds.stream().map(id -> skuPrice(id, 1_000 + id, 0)).toList());
+        }
     }
 
     private SkuInternalProcessor processor(boolean customOrderFeature) {
+        return processor(customOrderFeature, PriceSourceProperties.Mode.LEGACY);
+    }
+
+    private SkuInternalProcessor processor(boolean customOrderFeature, PriceSourceProperties.Mode mode) {
         return new SkuInternalProcessor(
             skuRepositoryPort, productRepositoryPort, stockRepositoryPort, productOptionRepositoryPort,
-            productCustomOrderFieldRepositoryPort, new StoreProperties(new StoreProperties.Features(customOrderFeature, false, false, false))
+            productCustomOrderFieldRepositoryPort, new StoreProperties(new StoreProperties.Features(customOrderFeature, false, false, false)),
+            priceSourceSnapshotRepositoryPort, new PriceSourceProperties(mode), priceSourceMetricsPort
         );
     }
 
