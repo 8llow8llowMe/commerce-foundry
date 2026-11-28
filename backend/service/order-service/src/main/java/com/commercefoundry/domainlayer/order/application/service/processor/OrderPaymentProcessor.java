@@ -138,6 +138,14 @@ public class OrderPaymentProcessor {
     }
 
     /**
+     * product 장애로 실패한 해제 프로브를 스윕에 넘겨도 되는가(#582) — 스윕이 켜져 있어야 확정 시도 작업 행으로 남은 확정 선점을 복원할 주체가 있다.
+     * 꺼져 있으면 거절을 미루고 재전달 · DLT 로 간다.
+     */
+    public boolean canDeferProbeToSweep() {
+        return restorationProperties.sweep().enabled();
+    }
+
+    /**
      * 원격 I/O 없이 DB 구간만 새 트랜잭션으로 묶는다. 충돌은 바깥 Facade가 잡고 새 트랜잭션에서 재판정한다.
      * orders NOWAIT 잠금 → payment 조회/의도와 복원 작업 INSERT 또는 PAID 저장 → inbox → 회신 outbox 순서다. 뒤 단계 실패는 모두 롤백한다.
      * 의도 INSERT는 주문 버전을 바꾸지 않으므로 @Version만으로 PAID와 상호 배제되지 않는다. 원격 I/O는 이 잠금 밖이다.

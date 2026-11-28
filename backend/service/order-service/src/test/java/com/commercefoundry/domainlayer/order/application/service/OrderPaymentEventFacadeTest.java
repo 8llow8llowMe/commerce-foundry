@@ -137,6 +137,48 @@ class OrderPaymentEventFacadeTest {
         verify(database, never()).completeRestoration(any(), any(), any());
     }
 
+    @Test
+    void unavailableProbeRejectsAtOnceWhenSweepCanRestoreLeftoverConfirmation() {
+        canceledOrderWithFailingProbe(new OrderException(OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE));
+        when(database.canDeferProbeToSweep()).thenReturn(true);
+        when(database.complete(command, payment, null)).thenReturn(Optional.empty());
+
+        facade.approve(command);
+
+        verify(stock, times(1)).findConfirmedByReleaseProbe(20, List.of(77L, 66L));
+        verify(database, times(1)).complete(command, payment, null);
+        verify(stock, never()).restoreCanceledPayment(anyLong(), anyLong(), anyLong(), anyLong(), any());
+        verify(database, never()).completeRestoration(any(), any(), any());
+    }
+
+    @Test
+    void unavailableProbeStaysRetryableWhenSweepIsOff() {
+        canceledOrderWithFailingProbe(new OrderException(OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE));
+        when(database.canDeferProbeToSweep()).thenReturn(false);
+
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(OrderException.class)
+            .extracting(exception -> ((OrderException) exception).getErrorCode()).isEqualTo(OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE);
+        verify(database, never()).complete(any(), any(), any());
+    }
+
+    @Test
+    void inconsistentProbeStillGoesToDltEvenWithSweep() {
+        canceledOrderWithFailingProbe(new OrderException(OrderErrorCode.STOCK_RESERVATION_INCONSISTENT));
+        when(database.canDeferProbeToSweep()).thenReturn(true);
+
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(NonRetryableEventException.class);
+        verify(database, never()).complete(any(), any(), any());
+    }
+
+    private void canceledOrderWithFailingProbe(OrderException failure) {
+        when(verify.verify(command)).thenReturn(payment);
+        when(order.id()).thenReturn(20L);
+        when(database.inspect(payment, command.eventId())).thenReturn(new PaymentApprovalTarget(false, order, OrderPayment.Result.REJECTED_ORDER_CANCELED));
+        when(database.canProbe(payment, order)).thenReturn(true);
+        when(database.confirmationCandidates(10, order)).thenReturn(List.of(77L, 66L));
+        when(stock.findConfirmedByReleaseProbe(20, List.of(77L, 66L))).thenThrow(failure);
+    }
+
     @ParameterizedTest
     @EnumSource(value = OrderErrorCode.class, names = {"PRODUCT_SERVICE_UNAVAILABLE", "STOCK_RESERVATION_INCONSISTENT"})
     void restorationFailureLeavesInboxAndReplyForRedelivery(OrderErrorCode code) {

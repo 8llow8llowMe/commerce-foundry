@@ -25,6 +25,12 @@ public interface OrderStockRestorationRepositoryPort {
 
     Optional<OrderStockRestoration> findByReservationId(long reservationId);
 
+    /** 상태별 행 수 — 적체 경고. */
+    long countByStatus(OrderStockRestoration.Status status);
+
+    /** 상태별 가장 오래된 작업의 등록 시각 — 적체 경고. 없으면 빈 값. */
+    Optional<Instant> findOldestCreatedAt(OrderStockRestoration.Status status);
+
     void addConfirmationParticipant(long workId, long paymentId);
 
     boolean hasResolvedParticipant(long workId, Order order);

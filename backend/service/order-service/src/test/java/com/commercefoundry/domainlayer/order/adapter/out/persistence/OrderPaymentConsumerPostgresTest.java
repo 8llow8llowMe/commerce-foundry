@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.order.adapter.out.persistence;
 
 import com.commercefoundry.domainlayer.order.support.OrderPaymentConsumerContract;
 import com.commercefoundry.domainlayer.order.application.command.PaymentApprovalCommand;
+import com.commercefoundry.domainlayer.order.application.service.processor.OrderPaymentProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.PaymentRestorationSweepProcessor;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.commercefoundry.domainlayer.order.application.exception.StockReservationException;
@@ -89,6 +90,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
     private static final AtomicLong IDS = new AtomicLong(70_000_000);
     @MockitoSpyBean OrderPaymentRepositoryAdapter paymentWrites;
+    @MockitoSpyBean OrderPaymentProcessor spiedProcessor;
     @Autowired PaymentRestorationSweepProcessor sweepProcessor;
 
     @ParameterizedTest
@@ -330,6 +332,64 @@ class OrderPaymentConsumerPostgresTest extends OrderPaymentConsumerContract {
         assertThat(jdbc.queryForObject("select count(*) from orders.processed_event where event_id=?", Long.class, command.eventId())).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=?", Long.class, Long.toString(command.orderId())))
             .isEqualTo(1);
+    }
+
+    @Test
+    void unavailableProbeWithSweepRejectsOnceAndSweepRestoresLeftoverConfirmationWithSameClaim() {
+        var command = arrange(OrderStatus.PENDING_PAYMENT);
+        long reservation = originalReservation(command);
+        // 확정 시도 행 커밋 → 원격 확정 성공 → 결제 기록 전 중단, 그 뒤 주문이 취소된 상태를 만든다.
+        assertThat(processor.prepareConfirmation(verified(command), reservation, command.eventId())).isTrue();
+        long claim = workLedger.findByReservationId(reservation).orElseThrow().claimId();
+        jdbc.update("update orders.orders set status='CANCELED',version=version+1 where id=?", command.orderId());
+        doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN)).when(stock).release(reservation, command.orderId());
+        OrderPaymentProcessor target = AopTestUtils.getUltimateTargetObject(spiedProcessor);
+        doReturn(true).when(target).canDeferProbeToSweep();
+
+        facade.approve(command);
+        facade.approve(command); // 재전달은 inbox 로 끝난다
+
+        OrderPayment rejected = payments.findByPaymentId(command.paymentId()).orElseThrow();
+        assertThat(rejected.result()).isEqualTo(OrderPayment.Result.REJECTED_ORDER_CANCELED);
+        assertThat(rejected.restorationClaimId()).isNull();
+        assertThat(rejectedReplies(command)).isEqualTo(1);
+        var waiting = workLedger.findByClaimId(claim).orElseThrow();
+        assertThat(waiting.origin().name()).isEqualTo("CONFIRMATION_ATTEMPT");
+        assertThat(waiting.status().name()).isEqualTo("RESTORE_PENDING");
+        verify(stock, times(1)).release(reservation, command.orderId());
+        verifyNoInteractions(restorations);
+
+        // product 회복 — 스윕이 버려진 확정으로 바꾼 뒤 같은 클레임으로 복원한다. 회신은 더 나가지 않는다.
+        doThrow(new StockReservationException(StockReservationException.Failure.CONFIRMED)).when(stock).release(reservation, command.orderId());
+        makeDue(claim);
+        sweepBatch();
+        assertThat(workLedger.findByClaimId(claim).orElseThrow().origin().name()).isEqualTo("ABANDONED_CONFIRMATION");
+        makeDue(claim);
+        sweepBatch();
+
+        var restored = workLedger.findByClaimId(claim).orElseThrow();
+        assertThat(restored.status().name()).isEqualTo("RESTORED");
+        verify(restorations, times(1)).restoreCancellation(claim, reservation, new TreeMap<>(Map.of(101L, 1)));
+        assertThat(rejectedReplies(command)).isEqualTo(1);
+        assertThat(payments.findByPaymentId(command.paymentId()).orElseThrow().restoredAt()).isNull();
+    }
+
+    @Test
+    void unavailableProbeWithoutSweepLeavesNoRecordForRedelivery() {
+        var command = arrange(OrderStatus.CANCELED);
+        long reservation = originalReservation(command);
+        doThrow(new StockReservationException(StockReservationException.Failure.UNKNOWN)).when(stock).release(reservation, command.orderId());
+
+        assertThatThrownBy(() -> facade.approve(command)).isInstanceOf(RuntimeException.class);
+
+        assertThat(payments.findByPaymentId(command.paymentId())).isEmpty();
+        assertThat(rejectedReplies(command)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from orders.processed_event where event_id=?", Long.class, command.eventId())).isZero();
+    }
+
+    private long rejectedReplies(PaymentApprovalCommand command) {
+        return jdbc.queryForObject("select count(*) from orders.outbox where aggregate_id=? and event_type='order-payment-rejected'", Long.class,
+            Long.toString(command.orderId()));
     }
 
     private long originalReservation(PaymentApprovalCommand command) {

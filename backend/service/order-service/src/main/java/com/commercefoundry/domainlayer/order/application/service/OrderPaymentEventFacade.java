@@ -22,6 +22,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.dao.PessimisticLockingFailureException;
@@ -29,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderPaymentEventFacade implements OrderPaymentEventUseCase {
@@ -97,10 +99,25 @@ public class OrderPaymentEventFacade implements OrderPaymentEventUseCase {
     /**
      * 결제 전 취소로 보이는 주문의 확정 선점 찾기 — 확정 뒤 DB 기록 전에 끊긴 처리가 남긴 확정이 있으면 그 선점을 확정 결과로 삼아 복원으로 넘긴다.
      * 없으면(확정 전 취소) 지금처럼 확정 · 재선점 없이 거절한다.
+     *
+     * <p>product 장애로 프로브가 실패하면(#582, {@code order-flow-guide.md} §3-6) 스윕이 켜져 있을 때만 확정 없음으로 보고 일반 거절 회신을 바로 낸다 —
+     * 환불이 product 가용성에 묶이지 않게. 원격 확정은 모두 확정 시도 작업 행을 먼저 커밋하므로({@code prepareConfirmation}) 남은 확정 선점은
+     * 스윕이 그 행을 버려진 확정으로 바꿔 같은 클레임으로 복원한다. 회신은 이 거절 한 번뿐이다. 스윕이 꺼져 있으면 복원할 주체가 없어 지금처럼 재전달 · DLT 다.
+     * 다시 해도 같은 불일치({@code STOCK_RESERVATION_INCONSISTENT})는 그대로 DLT 다.
      */
     private StockConfirmation probeConfirmed(VerifiedPayment payment, Order canceled) {
-        OptionalLong confirmed = stockCall(() -> orderStockProcessor.findConfirmedByReleaseProbe(canceled.id(),
-            orderPaymentProcessor.confirmationCandidates(payment.paymentId(), canceled)));
+        OptionalLong confirmed;
+        try {
+            confirmed = stockCall(() -> orderStockProcessor.findConfirmedByReleaseProbe(canceled.id(),
+                orderPaymentProcessor.confirmationCandidates(payment.paymentId(), canceled)));
+        } catch (OrderException exception) {
+            if (exception.getErrorCode() != OrderErrorCode.PRODUCT_SERVICE_UNAVAILABLE || !orderPaymentProcessor.canDeferProbeToSweep()) {
+                throw exception;
+            }
+            log.warn("release probe unavailable, rejecting canceled order payment and leaving confirmation attempts to sweep. orderId={}, paymentId={}",
+                canceled.id(), payment.paymentId());
+            return null;
+        }
         return confirmed.isPresent() ? StockConfirmation.confirmed(confirmed.getAsLong()) : null;
     }
 

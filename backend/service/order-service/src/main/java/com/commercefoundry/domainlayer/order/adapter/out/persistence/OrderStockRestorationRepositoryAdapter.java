@@ -60,6 +60,16 @@ public class OrderStockRestorationRepositoryAdapter implements OrderStockRestora
     }
 
     @Override
+    public long countByStatus(Status status) {
+        return orderStockRestorationRepository.countByStatus(status);
+    }
+
+    @Override
+    public Optional<Instant> findOldestCreatedAt(Status status) {
+        return Optional.ofNullable(orderStockRestorationRepository.findOldestCreatedAt(status));
+    }
+
+    @Override
     @Transactional(propagation = Propagation.MANDATORY)
     public void addConfirmationParticipant(long workId, long paymentId) {
         Key key = new Key(workId, paymentId);

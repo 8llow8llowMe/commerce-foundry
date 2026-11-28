@@ -201,8 +201,12 @@ commerce:
 # 끄는 env 스위치를 두지 않는다(product 재고 선점 만료 스윕과 같다). test 프로파일만 enabled: false 로 끈다
 order:
   # #582: min-age는 최초 작업 등록 시각에만 적용한다. 운영 활성화는 deploy-guide.md를 따른다.
+  # backlog-*-age 는 스윕 틱의 적체 WARN/ERROR 임계다(1m <= warn < error <= 7d). sweep.enabled 가 true 면
+  # 결제 전 취소 거절의 해제 프로브가 product 장애로 실패해도 거절 회신을 바로 내고 남은 확정 선점은 스윕이 복원한다(order-flow-guide.md §3-6).
   payment-restoration:
     min-age: 5m
+    backlog-warn-age: 30m
+    backlog-error-age: 2h
     sweep:
       enabled: ${ORDER_PAYMENT_RESTORATION_SWEEP_ENABLED:false}
   # #308 PR-C 복원 복구 경로와 #15 완료 전 운영에서 열지 않는다. 기존 outbox 릴레이와 독립이다.

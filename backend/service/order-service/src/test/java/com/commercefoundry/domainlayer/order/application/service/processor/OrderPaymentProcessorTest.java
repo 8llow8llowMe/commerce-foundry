@@ -45,7 +45,8 @@ class OrderPaymentProcessorTest {
     private final OrderEventPort events = mock(OrderEventPort.class);
     private final ProcessedEventStore inbox = mock(ProcessedEventStore.class);
     private final OrderPaymentProcessor processor = new OrderPaymentProcessor(orders, payments, evidence, work,
-        new OrderPaymentRestorationProperties(java.time.Duration.ofMinutes(5)), events, inbox,
+        new OrderPaymentRestorationProperties(java.time.Duration.ofMinutes(5), java.time.Duration.ofMinutes(30), java.time.Duration.ofHours(2),
+            new OrderPaymentRestorationProperties.Sweep(false)), events, inbox,
         new TopicNames("commerce-foundry.test", "order"), new SnowflakeIdGenerator(1, 1), Clock.fixed(NOW, ZoneOffset.UTC));
     private final PaymentApprovalCommand command = new PaymentApprovalCommand(UUID.randomUUID(), 10, 20, 30, krw(4000), NOW, "CARD");
     private final VerifiedPayment done = new VerifiedPayment(10, 20, 30, krw(4000), NOW, "DONE");
