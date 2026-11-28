@@ -61,7 +61,8 @@ spring:
             connect-timeout: 2000
             read-timeout: 3000
           # 결제 취소 (PaymentCancelClient, #16 PR-2). payment 가 PG 취소(토스 read 6초)를 기다린 뒤 답하므로 기본 3초보다 길게 둔다.
-          # 넘으면 UNKNOWN 으로 보고 같은 클레임 아이디로 다시 부른다(payment 멱등 200)
+          # 넘으면 UNKNOWN 으로 보고 같은 클레임 아이디로 다시 부른다(payment 멱등 200).
+          # 같은 클라이언트의 무환불 판정(void, #17 A4)도 이 값을 쓴다 — payment 가 PG 잔액 조회를 기다린 뒤 답한다. 넘으면 UNAVAILABLE(거절하지 않는다)
           paymentCancelClient:
             connect-timeout: 2000
             read-timeout: 10000
@@ -97,6 +98,16 @@ resilience4j:
       # 503 PAYMENT_018(미확정)은 실패로 센다. 서킷이 열리면 UNKNOWN — 재시도 스케줄러가 같은 클레임으로 다시 보낸다
       payment-cancellation:
         base-config: default
+      # 결제 후 취소 거절 전 무환불 판정 (POST /internal/v1/payments/{paymentId}/cancellations/{claimId}/void, #17 A4). 환불 실행 서킷과 나눠 판정 장애가
+      # 환불 재시도를 막지 않게 한다. 어드민 동작 1회당 1회라 호출이 적어 기본 창(최소 10회)으로는 열리지 않는다 — 연속 3회 실패(창 3 · 실패율 100%)에 60초 열고,
+      # 반열림에서는 한 번만 시험한다. 4xx 는 세지 않는다(기본 설정). 서킷이 열리면 UNAVAILABLE — 거절하지 않는다
+      payment-cancellation-void:
+        base-config: default
+        sliding-window-size: 3
+        minimum-number-of-calls: 3
+        failure-rate-threshold: 100
+        wait-duration-in-open-state: 60s
+        permitted-number-of-calls-in-half-open-state: 1
 
 eureka:
   client:

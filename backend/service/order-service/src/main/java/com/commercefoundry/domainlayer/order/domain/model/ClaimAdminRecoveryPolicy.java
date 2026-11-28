@@ -1,11 +1,13 @@
 package com.commercefoundry.domainlayer.order.domain.model;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * 결제 후 취소 · 승인된 반품 클레임의 운영자 수습 자격 — 다시 시도(#17 A2b) · 수동 환불 확정 · 복원 생략 종결(#17 A3, 반품 B2b)의 신규 실행 자격만 판정하는 순수 정책이다.
+ * 결제 후 취소 · 승인된 반품 클레임의 운영자 수습 자격 — 다시 시도(#17 A2b) · 수동 환불 확정 · 복원 생략 종결(#17 A3, 반품 B2b) · 취소 거절(#17 A4, 취소만)의
+ * 신규 실행 자격만 판정하는 순수 정책이다.
  * 상태 전이는 {@link Claim} · {@link Order} 의 도메인 메서드, 저장 · 버전 대조 · 원격 호출은 application 의 {@code ClaimAdminRecoveryProcessor} 가 한다.
  * 이미 처리된 요청의 멱등 성공 판정기가 아니다 — 처리된 뒤의 같은 요청은 화면 버전 불일치로 거절된다.
  *
@@ -85,6 +87,70 @@ public final class ClaimAdminRecoveryPolicy {
         Objects.requireNonNull(claim, "claim");
         return !claim.isNew() && claim.status() == Claim.Status.RESTORATION_FAILED
             && COMPLETABLE_FAILURES.contains(claim.failureCode());
+    }
+
+    /**
+     * 주문을 보지 않고 클레임만으로 본 취소 거절 후보 (#17 A4) — 어드민 상세의 버튼 표시용이다. 실행 자격은 주문 · 같은 주문의 클레임 · 이력 · 결제 기록까지 보는
+     * {@link #requireCancellationRejection} 이다. 두 조건을 공유한다.
+     *
+     * <ul>
+     *   <li>R1 — 저장된 취소 클레임이고 결제사가 종결 거절한 환불 실패다({@link Claim#isRefundRejected()}: REFUND_FAILED 이고 {@link Claim#REFUND_UNCONFIRMED} 아님)</li>
+     *   <li>R2 — 다음 시도 시각이 없다(선점 · 대기 중인 클레임이 아니다)</li>
+     * </ul>
+     */
+    public static boolean isCancellationRejectionCandidate(Claim claim) {
+        Objects.requireNonNull(claim, "claim");
+        return !claim.isNew() && claim.type() == Claim.Type.CANCELLATION && claim.isRefundRejected() && claim.nextAttemptAt() == null;
+    }
+
+    /**
+     * 취소 거절의 실행 자격 (#17 A4) — 아래를 모두 만족해야 한다. 화면이 본 클레임 · 주문 버전 대조(R3)는 부르는 쪽(Processor)이 따로 한다.
+     * 이 자격은 거절해도 된다는 증거가 아니다 — payment 의 무환불 판정(void)이 {@code NO_REFUND_CONFIRMED} 여야 한다({@code payment-guide.md} §8-1).
+     *
+     * <ul>
+     *   <li>R1 · R2 — {@link #isCancellationRejectionCandidate}</li>
+     *   <li>R4 — 같은 저장 주문이 취소 요청(CANCEL_REQUESTED)이다</li>
+     *   <li>R5 — 같은 주문에 이 클레임 밖의 열린 취소({@link Claim#isOpenCancellation()})가 없다</li>
+     *   <li>R6 — 주문 상태 이력의 최신 행이 결제 완료 · 제작 중 · 상품 준비중 → 취소 요청이다. 그 밖(이력 없음 · 다른 행)이면 되돌릴 상태를 확인하지 못해 거절하지 않는다</li>
+     *   <li>R7 — 주문의 결제 완료 기록의 결제 아이디가 클레임의 결제 아이디와 같다</li>
+     * </ul>
+     *
+     * @param orderClaims 같은 주문의 클레임 전부 — 이 클레임이 들어 있어도 된다(아이디로 뺀다). 다른 주문의 클레임이 섞이면 {@link IllegalArgumentException}
+     * @param latestFromStatus 주문 상태 이력 최신 행의 이전 상태. 없으면 null
+     * @param latestToStatus 주문 상태 이력 최신 행의 다음 상태. 이력을 읽지 못했으면 null
+     * @param recordedPaymentId 주문의 결제 완료 기록({@link OrderPayment#paymentId()})의 결제 아이디
+     * @return 주문을 되돌릴 상태(최신 이력 행의 이전 상태) — {@link Order#rejectCancellation} 에 넘긴다
+     * @throws IllegalStateException 저장 전 클레임 · 같은 저장 주문이 아님 · R1 · R2 · R4~R7 위반
+     * @throws IllegalArgumentException 다른 주문의 클레임이 목록에 섞임
+     */
+    public static OrderStatus requireCancellationRejection(
+        Claim claim, Order order, List<Claim> orderClaims, OrderStatus latestFromStatus, OrderStatus latestToStatus, long recordedPaymentId
+    ) {
+        requireStored(claim);
+        requireSameStoredOrder(claim, order);
+        Objects.requireNonNull(orderClaims, "orderClaims");
+        if (!isCancellationRejectionCandidate(claim)) {
+            throw new IllegalStateException("결제사가 거절했고 진행 중이 아닌 취소 환불 실패만 취소 거절합니다: type=%s, status=%s".formatted(claim.type(), claim.status()));
+        }
+        if (order.status() != OrderStatus.CANCEL_REQUESTED) {
+            throw new IllegalStateException("취소 요청 주문만 취소 거절합니다: status=" + order.status());
+        }
+        for (Claim other : orderClaims) {
+            Objects.requireNonNull(other, "orderClaims element");
+            if (other.orderId() != claim.orderId()) {
+                throw new IllegalArgumentException("같은 주문의 클레임만 받습니다: orderId=%d, claimId=%d".formatted(claim.orderId(), other.id()));
+            }
+            if (other.id() != claim.id() && other.isOpenCancellation()) {
+                throw new IllegalStateException("같은 주문에 열린 다른 취소가 있습니다: claimId=" + other.id());
+            }
+        }
+        if (latestToStatus != OrderStatus.CANCEL_REQUESTED || latestFromStatus == null || !Order.isPaidBeforeShipment(latestFromStatus)) {
+            throw new IllegalStateException("되돌릴 주문 상태를 이력에서 확인하지 못했습니다: %s -> %s".formatted(latestFromStatus, latestToStatus));
+        }
+        if (!Objects.equals(claim.paymentId(), recordedPaymentId)) {
+            throw new IllegalStateException("주문의 결제 기록과 클레임의 결제가 다릅니다: claimId=" + claim.id());
+        }
+        return latestFromStatus;
     }
 
     private static void requireSameStoredOrder(Claim claim, Order order) {

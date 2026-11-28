@@ -24,7 +24,8 @@ import lombok.RequiredArgsConstructor;
  * 주문에 속한 클레임 — 반품 접수(RETURN)와 결제 후 고객 취소(CANCELLATION, #16 PR-2). 예상 환불액 null은 미산정이며 0원과 다르다.
  *
  * <p>취소 클레임의 수명은 {@code REQUESTED}(환불 대기) → {@code REFUNDED}(재고 복원 대기) → {@code COMPLETED} 이고, 종결 실패는
- * {@code REFUND_FAILED} · {@code RESTORATION_FAILED} 다. 상태는 아래 도메인 메서드로만 바꾼다. 환불 · 복원 호출은 이 클레임 아이디를 멱등 키로 쓴다.
+ * {@code REFUND_FAILED} · {@code RESTORATION_FAILED} 다. 결제사가 거절한 환불 실패는 운영자가 무환불을 확인한 뒤 취소 거절({@link #rejectCancellation})로
+ * {@code REJECTED}(끝)로 닫을 수 있다(#17 A4). 상태는 아래 도메인 메서드로만 바꾼다. 환불 · 복원 호출은 이 클레임 아이디를 멱등 키로 쓴다.
  * 결제 후 부분 취소(#684)는 한 주문에 취소 클레임을 여럿 둔다 — 항목별 취소 수량은 거절 밖 취소 클레임의 항목 합({@link #reservesCancellationQuantity()})이고,
  * 주문 정리는 환불이 기록된 취소({@link #isSettledCancellation()})만 센다. 주문당 열린 취소({@link #isOpenCancellation()})는 하나다(주문 잠금 · 상태 전이가 보장한다).
  *
@@ -309,10 +310,18 @@ public record Claim(
 
     /**
      * 아직 끝나지 않은 취소인가 (#684) — 환불 대기(REQUESTED) · 환불 실패(REFUND_FAILED). 하나라도 있으면 주문은 취소 요청에 머물고 출고하지 않는다.
-     * 환불 실패는 취소 거절 전이(A4)가 없어 운영자 수동 확정 · 재시도로만 끝난다.
+     * 환불 실패는 운영자 재시도 · 수동 확정으로 끝나고, 결제사가 거절한 환불 실패는 무환불 확인 뒤 취소 거절({@link #rejectCancellation}, #17 A4)로도 끝난다.
      */
     public boolean isOpenCancellation() {
         return type == Type.CANCELLATION && (status == Status.REQUESTED || status == Status.REFUND_FAILED);
+    }
+
+    /**
+     * 거절된 취소인가 (#17 A4) — 결제사가 거절한 환불 실패를 운영자가 무환불 확인 뒤 닫은 취소다({@link #rejectCancellation}). 환불 · 복원이 없고
+     * 취소 수량 합산({@link #reservesCancellationQuantity()})에서 빠진다. 반품 클레임은 아니다.
+     */
+    public boolean isRejectedCancellation() {
+        return type == Type.CANCELLATION && status == Status.REJECTED;
     }
 
     /**
@@ -510,7 +519,8 @@ public record Claim(
      * 실패 코드는 지우고 다음 시각을 {@code until}(선점 lease)로 둔다. 같은 클레임 아이디 · 저장된 결제 · 금액으로 다시 보내므로 원격은 멱등이다.
      *
      * <p>결과 미확인이 아닌 환불 실패(결제사의 종결 거절)는 다시 열지 않는다 — payment 는 같은 claimId 의 거절 원장 때문에 늘 {@code PAYMENT_016} 을 돌려주므로
-     * 다시 보내도 진짜 거절 사유 코드만 지워진다. 그 건은 대표 관리자의 수동 확정(A3) 몫이다. 재시도 자격은 {@link ClaimAdminRecoveryPolicy#requireRetry} 가 먼저 본다.
+     * 다시 보내도 진짜 거절 사유 코드만 지워진다. 그 건은 대표 관리자의 수동 확정(A3) 또는 무환불 확인 뒤 취소 거절(A4, 취소만) 몫이다.
+     * 재시도 자격은 {@link ClaimAdminRecoveryPolicy#requireRetry} 가 먼저 본다.
      *
      * @param attemptCount 다시 연 단계의 시작 횟수 — 결제 취소 키의 유효 기간 안에서 자동 재시도가 끝나도록 부르는 쪽이 정한다(0 이상)
      */
@@ -563,6 +573,27 @@ public record Claim(
     public Claim completeByAdmin(Decision decision) {
         requireDecisionOn(Status.RESTORATION_FAILED, decision);
         return new Claim(id, orderId, requestKey, type, Status.COMPLETED, expectedRefund, paymentId, attemptCount, null, null, decision, approval, items,
+            requestedAt, version);
+    }
+
+    /**
+     * 결제 후 취소 거절 (#17 A4) — 결제사가 종결 거절한 저장된 취소 환불 실패({@link #isRefundRejected()}: REFUND_FAILED 이고 {@link #REFUND_UNCONFIRMED} 아님)를
+     * 거절(REJECTED, 끝)로 닫는다. 결정의 직전 실패 코드는 지금 실패 코드와 같아야 한다 — 실패 코드 칸은 비지만 근거는 결정에 남는다({@link #confirmRefundByAdmin} 과 같다).
+     * 다음 시각은 비우고 결제 아이디 · 환불액 · 횟수는 그대로 둔다. 거절된 취소는 취소 수량 합산({@link #reservesCancellationQuantity()})에서 빠진다.
+     *
+     * <p>이 전이만으로 거절해도 된다는 뜻이 아니다 — payment 의 무환불 판정(void)이 {@code NO_REFUND_CONFIRMED} 여야 하고(결제사 거절 코드는 무환불 증거가 아니다,
+     * {@code payment-guide.md} §8-1), 주문 · 같은 주문의 클레임 · 상태 이력 · 결제 기록 자격은 {@link ClaimAdminRecoveryPolicy#requireCancellationRejection} 이 먼저 본다.
+     * 주문 복귀({@link Order#rejectCancellation})는 부르는 쪽이 같은 트랜잭션에서 한다.
+     *
+     * @throws IllegalStateException 취소가 아님 · 저장 전 · 결제사가 거절한 환불 실패가 아님 · 결정의 직전 실패 코드가 지금 실패 코드와 다름
+     */
+    public Claim rejectCancellation(Decision decision) {
+        Objects.requireNonNull(decision, "decision");
+        if (type != Type.CANCELLATION || !isRefundRejected()) {
+            throw new IllegalStateException("결제사가 거절한 취소 환불 실패만 취소 거절합니다: type=%s, status=%s".formatted(type, status));
+        }
+        requireDecisionOn(Status.REFUND_FAILED, decision);
+        return new Claim(id, orderId, requestKey, type, Status.REJECTED, expectedRefund, paymentId, attemptCount, null, null, decision, approval, items,
             requestedAt, version);
     }
 

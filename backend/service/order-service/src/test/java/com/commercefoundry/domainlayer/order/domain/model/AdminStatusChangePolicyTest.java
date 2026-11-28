@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 
 /** 어드민 직접 전이 정책 (#17) — 전이 표 안에서도 다른 흐름의 전이는 막는다. */
 class AdminStatusChangePolicyTest {
@@ -33,6 +34,8 @@ class AdminStatusChangePolicyTest {
         "PAID, CANCEL_REQUESTED, NOT_MANUAL",
         "CANCEL_REQUESTED, CANCELED, NOT_MANUAL",
         "CANCEL_REQUESTED, PAID, NOT_MANUAL",
+        "CANCEL_REQUESTED, MAKING, NOT_MANUAL",
+        "CANCEL_REQUESTED, PREPARING, NOT_MANUAL",
         "DELIVERED, PURCHASE_CONFIRMED, NOT_MANUAL",
         "RETURN_REQUESTED, RETURNED, NOT_MANUAL",
         "PENDING_PAYMENT, PREPARING, NOT_IN_TABLE",
@@ -62,6 +65,21 @@ class AdminStatusChangePolicyTest {
         assertThat(AdminStatusChangePolicy.decide(requested, OrderStatus.PAID)).isEqualTo(Decision.NOT_MANUAL);
         assertThat(AdminStatusChangePolicy.manualTargets(requested)).isEmpty();
         assertThatThrownBy(() -> requested.changeStatus(OrderStatus.PAID)).isInstanceOf(OrderStatusTransitionException.class);
+    }
+
+    @ParameterizedTest(name = "취소 요청 → {0}")
+    @EnumSource(value = OrderStatus.class, names = {"PAID", "MAKING", "PREPARING"})
+    @DisplayName("취소 거절 복귀(#17 A4)는 표에 있지만 어드민 직접 전이가 아니다 — 다른 흐름(ORDER_023)이고, 도메인 changeStatus 도 거절한다. rejectCancellation 만 한다")
+    void cancellationRejectionRestoreIsNotManual(OrderStatus restoreTo) {
+        for (boolean customOrder : new boolean[] {true, false}) {
+            Order requested = order(OrderStatus.CANCEL_REQUESTED, customOrder);
+
+            assertThat(OrderStatus.CANCEL_REQUESTED.canTransitionTo(restoreTo)).isTrue();
+            assertThat(AdminStatusChangePolicy.decide(requested, restoreTo)).as("맞춤 제작=%s", customOrder).isEqualTo(Decision.NOT_MANUAL);
+            assertThat(AdminStatusChangePolicy.manualTargets(requested)).isEmpty();
+            assertThatThrownBy(() -> requested.changeStatus(restoreTo)).isInstanceOf(OrderStatusTransitionException.class);
+            assertThat(requested.rejectCancellation(restoreTo).status()).isEqualTo(restoreTo);
+        }
     }
 
     @Test

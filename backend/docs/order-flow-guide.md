@@ -23,6 +23,7 @@ PENDING_PAYMENT ──▶ PAID ──▶ PREPARING ──▶ SHIPPING ──▶ 
 EXPIRED ──▶ PAID (결제 확인 + 재선점 + 확정 200 CONFIRMED)
 PENDING_PAYMENT ──▶ CANCELED (결제 전 고객 취소, #16 — 선점 해제는 order-canceled 이벤트)
 CANCEL_REQUESTED ──▶ PAID (취소 정리 — 열린 취소 없이 일부 수량만 환불, #684 §1-4. Order#settleCancellation 만)
+CANCEL_REQUESTED ──▶ PAID · MAKING · PREPARING (결제 후 취소 거절 — 무환불이 확정된 거절만, 이력의 직전 상태로, #17 A4. Order#rejectCancellation 만)
 RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일부만 환불 · 전부 거절, #17 B1. Order#settleReturn 만)
 ```
 
@@ -38,6 +39,7 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
 | `PURCHASE_CONFIRMED` | 구매 확정 (고객 확정 또는 N일 경과 자동) | 고객 / 스케줄러 |
 | `CANCEL_REQUESTED` → `CANCELED` | 출고 전 취소 (환불 포함) — 환불이 기록된 취소 수량이 주문 전 수량일 때 | 고객 요청 → 환불 확정 시 자동(#16 PR-2, 어드민 승인 단계 없음). 환불 실패 · 미확정은 운영자(#17) |
 | `CANCEL_REQUESTED` → `PAID` | 취소 정리 — 열린 취소(환불 대기 · 환불 실패) 없이 일부 수량만 환불됐을 때. 남은 수량을 출고한다 | 부분 취소 처리(#684, §1-4) — `Order#settleCancellation` 만. `changeStatus(PAID)` 는 도메인이 거절하고 어드민 상태 변경(PATCH)은 `ORDER_023` |
+| `CANCEL_REQUESTED` → `PAID` · `MAKING` · `PREPARING` | 결제 후 취소 거절 — 환불이 결제사에서 종결 거절됐고 payment 무환불 판정이 `NO_REFUND_CONFIRMED` 일 때만, 상태 이력 최신 행의 직전 상태로 돌아간다 | 대표(#17 A4) — `Order#rejectCancellation` 만. `changeStatus` 는 도메인이 거절하고 어드민 상태 변경(PATCH)은 `ORDER_023` |
 | `PENDING_PAYMENT` → `CANCELED` | 결제 전 취소 (환불 없음, 선점 해제) | 고객 (#16) |
 | `RETURN_REQUESTED` → `RETURNED` | 배송 후 반품 (회수 후 환불) — 환불이 기록된 반품 수량이 주문 전 수량일 때 | 고객 요청 → 어드민 승인 · 환불(#17 B2) |
 | `RETURN_REQUESTED` → `DELIVERED` | 반품 정리 — 열린 반품(접수 · 승인 · 환불 실패) 없이 일부만 환불됐거나 전부 거절됐을 때. 배송 완료 시각은 그대로다 | 반품 처리(#17 B2) — `Order#settleReturn` 만. 어드민 상태 변경(PATCH)은 `ORDER_023` |
@@ -60,9 +62,10 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
   응답은 그 시점 상세다 — 환불 확정이면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(200). 이미 취소 요청 · 취소 완료이고 취소 클레임이 있으면 다시 돌리지 않고
   현재 상세 200 이다(더블 클릭 — 잠금 · 버전 · 결정적 키에서 진 쪽도 다시 읽어 같으면 200, 다시 판정할 수 없으면 409 `ORDER_025`). 결제 완료 기록(`order_payment` PAID)이
   없으면 500 `ORDER_033`, 전체 취소액이 승인 금액과 다르면 500 `ORDER_034` 로 접수하지 않는다.
-  **취소 거절 전이(`CANCEL_REQUESTED` → 원래 상태, A4)는 표에 넣지 않는다** — 환불 실패(`REFUND_FAILED`)의 출구는 운영자 수동 확정 · 재시도다(#17 A1 · §5).
-  환불 거절 주문은 `CANCEL_REQUESTED` 로 남고 출고하지 않는다. 표에 있는 `CANCEL_REQUESTED → PAID` 는 거절이 아니라 부분 취소의 **환불이 확정된 뒤**의 정리다(§1-4)
-  — 환불이 나가지 않은 취소로 결제 완료에 돌아가는 길은 없다.
+  환불 거절 주문은 `CANCEL_REQUESTED` 로 남고 출고하지 않는다. 출구는 운영자 수동 환불 확정 · 재시도(#17 A1 · §5)와 **결제 후 취소 거절**(#17 A4)이다.
+  취소 거절은 payment 무환불 판정이 `NO_REFUND_CONFIRMED` 일 때만 `Order#rejectCancellation` 으로 상태 이력의 직전 상태(결제 완료 · 제작 중 · 상품 준비중)로 돌린다
+  — 돈이 나갔을 수 있으면(결과 미확인 `REFUND_UNCONFIRMED` 포함) 돌아가는 길은 없다. 표의 `CANCEL_REQUESTED → PAID` 중 부분 취소 정리(`Order#settleCancellation`)는
+  **환불이 확정된 뒤**의 정리다(§1-4). 거절 API · 조건 · 순서는 PR-2 에서 이 문서에 적는다.
 - **결제 전 취소** (`Order#cancelBeforePayment`): 상태 · `CUSTOMER` 이력(사유 = 취소 사유 코드) · `order-canceled` outbox 를 한 트랜잭션으로 쓴다(§3-5).
   이미 취소됐으면 아무것도 쓰지 않고 성공이다. 읽은 뒤 결제 완료 · 만료가 먼저 커밋하면 `@Version` 비교로 롤백하고 다시 읽는다 — 취소 완료면 200,
   결제 완료 · 상품 준비중 · 제작 중이면 결제 후 취소로 넘기고(#16 PR-2), 그 밖(만료 등)은 409 `ORDER_020` 이다.
@@ -81,7 +84,7 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
   — 시각 없이 배송 중 · 배송 완료가 되지 않게. 어드민 수동 배송 완료(#17)도 `deliver(now)` 를 거쳐 `delivered_at` 을 채운다. 이미 그 뒤 상태면(`ship` 은 배송 중 ·
   배송 완료 · 구매 확정 · 반품, `deliver` 는 배송 완료 · 구매 확정 · 반품 — 전이 표에서 배송 중 · 배송 완료로부터 닿는 상태와 같고 `OrderTest` 가 표로 계산해 맞춘다)
   바꾸지 않은 값을 돌려주고 처음 시각을 덮지 않는다. 그 밖은 `ORDER_020` 이다 — 상품 준비중에서 바로 배송 완료하지 않는다. 취소 요청(`CANCEL_REQUESTED`) 주문도
-  출고하지 않는다 — 먼저 취소를 처리한다. 취소 거절 전이(취소 요청 → 원래 상태)는 표에 없다(위 "결제 후 취소"). 부분 취소가 정리돼 결제 완료로 돌아간 주문은
+  출고하지 않는다 — 먼저 취소를 처리한다. 취소 거절(취소 요청 → 직전 상태)은 `Order#rejectCancellation` 만 한다(위 "결제 후 취소"). 부분 취소가 정리돼 결제 완료로 돌아간 주문은
   남은 수량만 출고한다(§1-4).
   `delivered_at` 은 자동 구매 확정(#18 PR-C)의 기준이고 `idx_orders_status_delivered_at_id(status, delivered_at, id)` 로 읽는다.
   두 칸이 생기기 전에 배송 중 · 배송 완료가 된 주문은 **배포 전 운영 SQL(PR 본문)** 로 상태 이력 시각을 채운다 — 채우지 못한 행은 null 로 남을 수 있어
@@ -190,7 +193,8 @@ PR 분할과 이 절의 범위:
 **알려진 한계**
 
 - 취소 클레임의 `PAYMENT_016`(겹침)은 지금 거절로 분류된다. 앞 부분 취소를 수동 확정해 payment 원장이 PENDING 으로 남은 드문 경우다 — #693 order 2단계와 함께 정한다.
-- 취소 거절 전이(A4)가 없어 결제사가 종결 거절하면 출구는 수동 환불 확정뿐이다.
+- 취소 거절(A4)은 도메인 전이(`Claim#rejectCancellation` · `Order#rejectCancellation`)와 payment 무환불 판정 호출 포트까지만 있고 어드민 API 가 아직 없다(#17 A4 PR-2).
+  그때까지 결제사가 종결 거절하면 출구는 수동 환불 확정뿐이다.
 - PR-3 전까지 `ReturnRefundPolicy` 는 거절이 아닌 취소 클레임이 있으면 예외를 던진다. 고객 부분 취소 API(PR-4) 전이라 운영 동작에는 영향이 없다.
 
 ## 2. 주문 금액
@@ -1070,7 +1074,8 @@ A1에는 호출부·관리자 상태 전이·새 enum·HTTP 응답·권한 변�
 
 - **대기 판정은 유형을 본다** — 환불 대기는 취소 `REQUESTED` · 반품 `APPROVED`, 복원 대기는 둘 다 `REFUNDED` 다(`Claim.Type#isAwaitingAttempt`,
   `Claim#isAwaitingAttempt` · `#isAwaitingRefund`). `Claim.Status` 의 상태만 보는 대기 판정은 없앴다 — 취소 결과는 그대로다.
-  취소 클레임은 `APPROVED` · 승인 기록을 두지 않는다(`ck_claim_cancellation_not_approved`). `REJECTED` 는 취소 거절(A4)에도 쓸 수 있게 취소에서 막지 않지만 전이는 아직 없다.
+  취소 클레임은 `APPROVED` · 승인 기록을 두지 않는다(`ck_claim_cancellation_not_approved`). `REJECTED` 는 취소 거절(A4)에도 쓴다 — `Claim#rejectCancellation` 은 결제사 종결 거절(`REFUND_FAILED`, 결과 미확인 제외)에서만 가고
+  직전 실패 코드를 결정 칸에 남긴다(실패 코드 · 다음 시각은 비운다). 거절된 취소는 수량 합산 · 열린 취소에서 빠진다.
 - **결제 취소 키 기한(14일)의 기준** — `Claim#refundDeadlineBase()`: 취소는 접수 시각, 반품은 **승인 시각**이다(검수 뒤 승인할 때 처음 환불을 보낸다).
   어드민 다시 시도 · 수동 확정의 기한 판정(`ClaimAdminRecoveryProcessor`)이 이 값을 쓰고, 환불 단계 판정도 `Claim#isAwaitingRefund` 로 바꿨다 — 승인 전 반품은 환불 단계가 아니다.
 - **어떤 반품이 수량 · 환불 · 정리에 잡히나 — `Claim` 술어 한 곳** — `reservesReturnQuantity()`(거절만 뺀 전부) = `isSettledReturn()`(환불 기록:
@@ -1150,7 +1155,7 @@ B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지
     lease 안(자동 처리 중)은 409 `ORDER_039`, 버전 불일치 · 저장 경합은 409 `ORDER_037` 이라 스케줄러 · 고객 · 다른 운영자와 겹쳐도 원격은 한 번만 나간다.
     재시도 스케줄러가 꺼져 있으면 503 `ORDER_040` 이다(다시 연 뒤 미확정을 따라갈 쪽이 없다). 원격 단계가 반영 없이 끊기면 스케줄러처럼 미확정 한 번으로 센다.
     다시 시도는 무환불을 확정하지 않는다. CAS 경합(저장 직전에 멈춘 쪽이 다른 운영자 · 스케줄러의 커밋 뒤 지는 경로)은 `ClaimAdminRetryWebIntegrationTest` 가 래치로 직접 만든다.
-    취소 거절(A4)은 후속이다.
+    취소 거절(A4)의 어드민 API 는 PR-2 다(도메인 전이 · 무환불 판정 포트는 PR-1).
   - **수동 환불 확정 (#17 A3, `POST /api/v1/admin/claims/{claimId}/refund-confirmation`, `SETTLEMENT_MANAGE` — 대표만)** — 대표가 PG · 결제 관리 화면에서 환불을
     확인한 `REFUND_FAILED` 를 `ClaimAdminRecoveryProcessor.confirmRefund` 가 한 트랜잭션에서 바꾼다 — 화면 버전 대조 → 주문 조회 →
     `ClaimAdminRecoveryPolicy.requireRefundConfirmation(claim, order, refundRetryClosed)`(같은 저장 주문 · 주문 `CANCEL_REQUESTED`|`CANCELED` · 결제사 거절이거나

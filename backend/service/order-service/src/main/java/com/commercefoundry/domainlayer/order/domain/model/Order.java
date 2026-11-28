@@ -46,7 +46,10 @@ public record Order(
     private static final Set<OrderStatus> DELIVERED_OR_LATER = Collections.unmodifiableSet(EnumSet.of(
         OrderStatus.DELIVERED, OrderStatus.PURCHASE_CONFIRMED, OrderStatus.RETURN_REQUESTED, OrderStatus.RETURNED));
 
-    /** 결제 뒤 출고 전 상태 — 고객 결제 후 취소({@link #requestCancellation()})가 취소 요청으로 보낼 수 있는 상태다. 전이 표와 같아야 한다. */
+    /**
+     * 결제 뒤 출고 전 상태 — 고객 결제 후 취소({@link #requestCancellation()})가 취소 요청으로 보낼 수 있는 상태이자, 취소 거절({@link #rejectCancellation})이
+     * 되돌릴 수 있는 상태다(#17 A4). 전이 표와 같아야 한다.
+     */
     private static final Set<OrderStatus> PAID_BEFORE_SHIPMENT = Collections.unmodifiableSet(EnumSet.of(
         OrderStatus.PAID, OrderStatus.MAKING, OrderStatus.PREPARING));
 
@@ -116,13 +119,14 @@ public record Order(
      * 출고(배송 중) · 배송 완료도 이 메서드로 하지 않는다 — 시각을 함께 남겨야 해 {@link #ship(Instant)} · {@link #deliver(Instant)} 를 쓴다(#18).
      * 반품 요청 → 배송 완료 복귀도 마찬가지로 {@link #settleReturn(ReturnRefundPolicy.ReturnOutcome)} 만 한다(#17 B1).
      * 취소 요청 → 결제 완료 복귀(부분 취소 정리)도 {@link #settleCancellation(CancellationRefundPolicy.CancellationOutcome)} 만 한다(#684).
+     * 취소 요청 → 제작 중 · 상품 준비중 복귀(취소 거절)는 {@link #rejectCancellation(OrderStatus)} 만 한다(#17 A4) — 결제 완료 복귀도 그 메서드가 함께 쓴다.
      *
-     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문 · 결제 전 취소 · 출고 · 배송 완료 · 취소 요청에서 결제 완료
+     * @throws OrderStatusTransitionException 표 밖 전이 · 저장 전 주문 · 결제 전 취소 · 출고 · 배송 완료 · 취소 요청에서 결제 완료 · 제작 중 · 상품 준비중
      */
     public Order changeStatus(OrderStatus next) {
         Objects.requireNonNull(next, "next");
         if (isNew() || (status == OrderStatus.PENDING_PAYMENT && next == OrderStatus.CANCELED)
-            || (status == OrderStatus.CANCEL_REQUESTED && next == OrderStatus.PAID)
+            || (status == OrderStatus.CANCEL_REQUESTED && PAID_BEFORE_SHIPMENT.contains(next))
             || next == OrderStatus.SHIPPING || next == OrderStatus.DELIVERED) {
             throw new OrderStatusTransitionException(status, next);
         }
@@ -276,7 +280,8 @@ public record Order(
      * 열린 취소 없이 일부만이면 결제 완료로 돌아가고(부분 취소 — 남은 수량을 출고한다), 열린 취소가 남았으면 취소 요청에 머문다. 이미 그 상태면 바꾸지 않은 이 값을
      * 돌려준다 — {@link #completeCancellation()} 과 같이 확정 반영 재시도가 안전하다. 목표는 정책 결과로만 받는다 — 주문은 클레임을 읽지 않는다.
      *
-     * <p>취소 요청 → 결제 완료 전이는 이 메서드만 한다 — {@link #changeStatus} 는 거절하고, 어드민 직접 전이({@link AdminStatusChangePolicy})에도 없다.
+     * <p>취소 요청 → 결제 완료 전이는 이 메서드와 취소 거절({@link #rejectCancellation}, #17 A4)만 한다 — {@link #changeStatus} 는 거절하고,
+     * 어드민 직접 전이({@link AdminStatusChangePolicy})에도 없다.
      * 지금은 부르는 곳이 없다 — 결제 후 취소 엔진(#684 PR-2)이 {@link #completeCancellation()} 대신 부른다.
      *
      * @throws OrderStatusTransitionException 취소 요청이 아닌 상태에서의 전이 · 저장 전 주문
@@ -291,6 +296,31 @@ public record Order(
             throw new OrderStatusTransitionException(status, next);
         }
         return transitionTo(next);
+    }
+
+    /**
+     * 결제 후 취소 거절 (#17 A4) — 취소 요청 주문을 취소 요청 전 상태(결제 완료 · 제작 중 · 상품 준비중)로 되돌린다. 되돌릴 상태는 부르는 쪽이 주문 상태 이력의
+     * 최신 행(그 상태 → 취소 요청)에서 꺼내고 {@link ClaimAdminRecoveryPolicy#requireCancellationRejection} 이 확인한다 — 주문은 클레임 · 이력을 읽지 않는다.
+     * 출고 · 배송 완료 시각은 그대로 둔다.
+     *
+     * <p>취소 요청 → 제작 중 · 상품 준비중 전이는 이 메서드만 한다 — {@link #changeStatus} 는 거절하고, 어드민 직접 전이({@link AdminStatusChangePolicy})에도 없다
+     * (어드민 PATCH 는 {@code ORDER_023}). 취소 요청 → 결제 완료는 부분 취소 정리({@link #settleCancellation})와 함께 쓴다.
+     * 멱등 분기를 두지 않는다 — 이미 되돌린 주문은 취소 요청이 아니어서 전이 예외다. 같은 거절의 재요청은 부르는 쪽이 클레임 상태 · 버전으로 먼저 거른다.
+     *
+     * @param restoreTo 되돌릴 상태 — 결제 완료 · 제작 중 · 상품 준비중만
+     * @throws OrderStatusTransitionException 저장 전 주문 · 취소 요청이 아닌 상태 · 그 밖의 목표 상태
+     */
+    public Order rejectCancellation(OrderStatus restoreTo) {
+        Objects.requireNonNull(restoreTo, "restoreTo");
+        if (isNew() || status != OrderStatus.CANCEL_REQUESTED || !PAID_BEFORE_SHIPMENT.contains(restoreTo)) {
+            throw new OrderStatusTransitionException(status, restoreTo);
+        }
+        return transitionTo(restoreTo);
+    }
+
+    /** 결제 뒤 출고 전 상태인가 — 고객 결제 후 취소의 출발 상태이자 취소 거절의 복귀 상태다. 클레임 수습 정책이 같은 집합으로 이력을 판정한다(#17 A4). */
+    static boolean isPaidBeforeShipment(OrderStatus status) {
+        return PAID_BEFORE_SHIPMENT.contains(status);
     }
 
     /** 결제 전 취소({@link #cancelBeforePayment()})를 할 수 있는가 — 결제 대기만이다(#16 PR-1). */

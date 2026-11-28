@@ -99,6 +99,21 @@ public abstract class OrderAdminPersistenceContract {
     }
 
     @Test
+    @DisplayName("취소 요청 → 결제 완료 · 제작 중 · 상품 준비중은 표에 있지만(부분 취소 정리 · 취소 거절 #17 A4) 어드민 화면이 바꾸지 않는다 — ORDER_023 이고 아무것도 쓰지 않는다")
+    void cancelRequestedRestorationIsNotManual() {
+        long canceling = create(OrderStatus.CANCEL_REQUESTED, true);
+
+        assertRejected(canceling, OrderStatus.PAID, OrderErrorCode.ADMIN_STATUS_CHANGE_NOT_ALLOWED);
+        assertRejected(canceling, OrderStatus.MAKING, OrderErrorCode.ADMIN_STATUS_CHANGE_NOT_ALLOWED);
+        assertRejected(canceling, OrderStatus.PREPARING, OrderErrorCode.ADMIN_STATUS_CHANGE_NOT_ALLOWED);
+        assertRejected(canceling, OrderStatus.CANCELED, OrderErrorCode.ADMIN_STATUS_CHANGE_NOT_ALLOWED);
+        assertRejected(canceling, OrderStatus.SHIPPING, OrderErrorCode.ORDER_STATUS_TRANSITION_INVALID);
+
+        assertThat(read(canceling).status()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+        assertThat(historyCount(canceling)).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("배송중 → 배송 완료는 사유(배송을 확인한 근거)가 있어야 한다 — 없으면 ORDER_027 이고 아무것도 쓰지 않는다")
     void deliveredRequiresReason() {
         long id = create(OrderStatus.PREPARING, false);

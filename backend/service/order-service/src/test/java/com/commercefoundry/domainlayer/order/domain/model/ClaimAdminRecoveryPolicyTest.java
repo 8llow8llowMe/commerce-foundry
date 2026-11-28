@@ -179,7 +179,7 @@ class ClaimAdminRecoveryPolicyTest {
 
     @Test
     void newStatusesAreNotRecoveryTargets() {
-        // #17 B1 — 거절된 취소(A4 몫, 아직 전이 없음)와 승인 · 거절된 반품은 다시 시도 · 수동 확정 · 종결 대상이 아니다(반품 수습은 B2)
+        // #17 B1 — 거절된 취소(A4 의 결과)와 승인 · 거절된 반품은 다시 시도 · 수동 확정 · 종결 대상이 아니다(반품 수습은 B2)
         Claim rejectedCancellation = claim(Claim.Status.REJECTED, null);
         Claim requestedReturn = new Claim(2, 1, UUID.randomUUID(), Claim.Type.RETURN, Claim.Status.REQUESTED, null,
             List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.DEFECTIVE)), NOW, 0L);
@@ -265,6 +265,182 @@ class ClaimAdminRecoveryPolicyTest {
         }
         assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, order(9, OrderStatus.RETURN_REQUESTED, 0L), false))
             .as("다른 주문").isInstanceOf(IllegalStateException.class);
+    }
+
+    // ---- #17 A4 취소 거절 자격 ----
+
+    private static final long RECORDED_PAYMENT_ID = 77L;
+
+    private static OrderStatus requireRejection(Claim claim, Order order, List<Claim> orderClaims, OrderStatus from, OrderStatus to, long paymentId) {
+        return ClaimAdminRecoveryPolicy.requireCancellationRejection(claim, order, orderClaims, from, to, paymentId);
+    }
+
+    private static Claim cancellation(long id, Claim.Status status, String failure) {
+        return new Claim(id, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 0,
+            Claim.Type.CANCELLATION.isAwaitingAttempt(status) ? NOW : null, failure, ITEMS, NOW, 0L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PAYMENT_016", "PAYMENT_017", "PAYMENT_019", "PAYMENT_001"})
+    void cancellationRejectionCandidateIsProviderRejectedRefundFailure(String failure) {
+        assertThat(ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(claim(Claim.Status.REFUND_FAILED, failure))).isTrue();
+    }
+
+    @Test
+    void cancellationRejectionCandidateExcludesEverythingElse() {
+        // R1 — 결과 미확인 환불 실패는 돈이 나갔을 수 있다. 다른 상태 · 저장 전 · 반품(막힘 016 포함)은 후보가 아니다
+        assertThat(ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(claim(Claim.Status.REFUND_FAILED, Claim.REFUND_UNCONFIRMED))).isFalse();
+        for (Claim.Status status : List.of(Claim.Status.REQUESTED, Claim.Status.REFUNDED, Claim.Status.COMPLETED, Claim.Status.REJECTED,
+            Claim.Status.RESTORATION_FAILED)) {
+            assertThat(ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(claim(status, status.isFailed() ? "PRODUCT_028" : null))).as(status.name())
+                .isFalse();
+        }
+        Claim base = claim(Claim.Status.REFUND_FAILED, "PAYMENT_016");
+        Claim unsaved = new Claim(base.id(), base.orderId(), base.requestKey(), base.type(), base.status(), base.expectedRefund(), base.paymentId(),
+            base.attemptCount(), base.nextAttemptAt(), base.failureCode(), base.items(), null, null);
+        assertThat(ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(unsaved)).isFalse();
+        assertThat(ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(returnClaim(Claim.Status.REFUND_FAILED, "PAYMENT_017"))).isFalse();
+        assertThat(ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(returnClaim(Claim.Status.REFUND_FAILED, Claim.REFUND_BLOCKED_CODE))).isFalse();
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(null)).isInstanceOf(NullPointerException.class);
+        // R2 — 다음 시도 시각이 있는 취소(환불 대기 선점)는 후보가 아니고, 다음 시각이 있는 환불 실패는 만들 수 없다(도메인 불변식)
+        assertThat(ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(claim(Claim.Status.REQUESTED, null))).isFalse();
+        assertThatThrownBy(() -> new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.REFUND_FAILED, krw(1_000), 77L, 0, NOW,
+            "PAYMENT_016", ITEMS, NOW, 0L)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"PAID", "MAKING", "PREPARING"})
+    void cancellationRejectionReturnsRestoreTargetWhenAllRulesHold(OrderStatus from) {
+        Claim failed = claim(Claim.Status.REFUND_FAILED, "PAYMENT_016");
+        // 같은 주문의 이 클레임 자신(열린 취소지만 아이디로 뺀다) · 정산된 취소 · 거절된 취소는 R5 를 막지 않는다
+        List<Claim> orderClaims = List.of(failed, cancellation(5, Claim.Status.COMPLETED, null), cancellation(6, Claim.Status.REJECTED, null),
+            cancellation(7, Claim.Status.RESTORATION_FAILED, "PRODUCT_028"));
+
+        OrderStatus restoreTo = requireRejection(failed, order(1, OrderStatus.CANCEL_REQUESTED, 0L), orderClaims, from, OrderStatus.CANCEL_REQUESTED,
+            RECORDED_PAYMENT_ID);
+
+        assertThat(restoreTo).isEqualTo(from);
+        assertThat(failed.status()).as("판정은 상태를 바꾸지 않는다").isEqualTo(Claim.Status.REFUND_FAILED);
+    }
+
+    @Test
+    void cancellationRejectionRequiresR1ProviderRejectedRefundFailure() {
+        Order order = order(1, OrderStatus.CANCEL_REQUESTED, 0L);
+        for (Claim source : List.of(claim(Claim.Status.REFUND_FAILED, Claim.REFUND_UNCONFIRMED), claim(Claim.Status.REQUESTED, null),
+            claim(Claim.Status.REFUNDED, null), claim(Claim.Status.COMPLETED, null), claim(Claim.Status.REJECTED, null),
+            claim(Claim.Status.RESTORATION_FAILED, "PRODUCT_028"), returnClaim(Claim.Status.REFUND_FAILED, "PAYMENT_017"))) {
+            assertThatThrownBy(() -> requireRejection(source, order, List.of(source), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID))
+                .as(source.type() + " " + source.status() + " " + source.failureCode()).isInstanceOf(IllegalStateException.class);
+        }
+        Claim base = claim(Claim.Status.REFUND_FAILED, "PAYMENT_016");
+        Claim unsaved = new Claim(base.id(), base.orderId(), base.requestKey(), base.type(), base.status(), base.expectedRefund(), base.paymentId(),
+            base.attemptCount(), base.nextAttemptAt(), base.failureCode(), base.items(), null, null);
+        assertThatThrownBy(() -> requireRejection(unsaved, order, List.of(), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requireRejection(null, order, List.of(), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID))
+            .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void cancellationRejectionRequiresR4SameStoredCancelRequestedOrder() {
+        Claim failed = claim(Claim.Status.REFUND_FAILED, "PAYMENT_019");
+        for (OrderStatus status : OrderStatus.values()) {
+            if (status != OrderStatus.CANCEL_REQUESTED) {
+                assertThatThrownBy(() -> requireRejection(failed, order(1, status, 0L), List.of(failed), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED,
+                    RECORDED_PAYMENT_ID)).as(status.name()).isInstanceOf(IllegalStateException.class);
+            }
+        }
+        assertThatThrownBy(() -> requireRejection(failed, order(2, OrderStatus.CANCEL_REQUESTED, 0L), List.of(), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED,
+            RECORDED_PAYMENT_ID)).as("다른 주문").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requireRejection(failed, order(1, OrderStatus.CANCEL_REQUESTED, null), List.of(), OrderStatus.PAID,
+            OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID)).as("저장 전 주문").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requireRejection(failed, null, List.of(), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID))
+            .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void cancellationRejectionRequiresR5NoOtherOpenCancellation() {
+        Claim failed = claim(Claim.Status.REFUND_FAILED, "PAYMENT_016");
+        Order order = order(1, OrderStatus.CANCEL_REQUESTED, 0L);
+        for (Claim other : List.of(cancellation(5, Claim.Status.REQUESTED, null), cancellation(5, Claim.Status.REFUND_FAILED, "PAYMENT_017"),
+            cancellation(5, Claim.Status.REFUND_FAILED, Claim.REFUND_UNCONFIRMED))) {
+            assertThatThrownBy(() -> requireRejection(failed, order, List.of(failed, other), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED,
+                RECORDED_PAYMENT_ID)).as(other.status() + " " + other.failureCode()).isInstanceOf(IllegalStateException.class);
+        }
+        Claim otherOrder = new Claim(5, 9, UUID.randomUUID(), Claim.Type.CANCELLATION, Claim.Status.COMPLETED, krw(1_000), 77L, 0, null, null, ITEMS, NOW, 0L);
+        assertThatThrownBy(() -> requireRejection(failed, order, List.of(failed, otherOrder), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED,
+            RECORDED_PAYMENT_ID)).as("다른 주문의 클레임").isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> requireRejection(failed, order, null, OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID))
+            .isInstanceOf(NullPointerException.class);
+        assertThat(requireRejection(failed, order, List.of(), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID))
+            .as("빈 목록도 다른 열린 취소가 없다").isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    void cancellationRejectionRequiresR6LatestHistoryFromPaidBeforeShipmentToCancelRequested() {
+        Claim failed = claim(Claim.Status.REFUND_FAILED, "PAYMENT_016");
+        Order order = order(1, OrderStatus.CANCEL_REQUESTED, 0L);
+        for (OrderStatus from : OrderStatus.values()) {
+            boolean restorable = from == OrderStatus.PAID || from == OrderStatus.MAKING || from == OrderStatus.PREPARING;
+            if (restorable) {
+                assertThat(requireRejection(failed, order, List.of(failed), from, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID)).isEqualTo(from);
+            } else {
+                assertThatThrownBy(() -> requireRejection(failed, order, List.of(failed), from, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID))
+                    .as(from.name()).isInstanceOf(IllegalStateException.class);
+            }
+        }
+        // 최신 행이 취소 요청으로 들어온 행이 아니면(이력 없음 · 다른 전이) 되돌릴 상태를 알 수 없다 — 닫힌 쪽
+        for (OrderStatus to : OrderStatus.values()) {
+            if (to != OrderStatus.CANCEL_REQUESTED) {
+                assertThatThrownBy(() -> requireRejection(failed, order, List.of(failed), OrderStatus.PAID, to, RECORDED_PAYMENT_ID)).as(to.name())
+                    .isInstanceOf(IllegalStateException.class);
+            }
+        }
+        assertThatThrownBy(() -> requireRejection(failed, order, List.of(failed), null, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requireRejection(failed, order, List.of(failed), OrderStatus.PAID, null, RECORDED_PAYMENT_ID))
+            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requireRejection(failed, order, List.of(failed), null, null, RECORDED_PAYMENT_ID)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void cancellationRejectionRequiresR7RecordedPaymentMatchesClaim() {
+        Claim failed = claim(Claim.Status.REFUND_FAILED, "PAYMENT_016");
+        Order order = order(1, OrderStatus.CANCEL_REQUESTED, 0L);
+
+        assertThatThrownBy(() -> requireRejection(failed, order, List.of(failed), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED, 78L))
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(requireRejection(failed, order, List.of(failed), OrderStatus.PAID, OrderStatus.CANCEL_REQUESTED, 77L)).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    void rejectedCancellationCannotBeRetriedConfirmedCompletedOrRejectedAgain() {
+        Claim failed = claim(Claim.Status.REFUND_FAILED, "PAYMENT_017");
+        Order order = order(1, OrderStatus.CANCEL_REQUESTED, 0L);
+        OrderStatus restoreTo = requireRejection(failed, order, List.of(failed), OrderStatus.PREPARING, OrderStatus.CANCEL_REQUESTED, RECORDED_PAYMENT_ID);
+        Claim rejected = failed.rejectCancellation(new Claim.Decision("결제사 콘솔에서 무환불 확인", 9, NOW, "PAYMENT_017"));
+        Order restored = order.rejectCancellation(restoreTo);
+
+        assertThat(rejected.status()).isEqualTo(Claim.Status.REJECTED);
+        assertThat(restored.status()).isEqualTo(OrderStatus.PREPARING);
+        assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRetry(rejected, NOW.plusSeconds(1))).as("다시 시도").isInstanceOf(IllegalStateException.class);
+        assertThat(ClaimAdminRecoveryPolicy.isRefundConfirmationCandidate(rejected, true)).as("확정 후보").isFalse();
+        for (Order target : List.of(order, restored, order(1, OrderStatus.CANCELED, 0L))) {
+            assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireRefundConfirmation(rejected, target, true)).as("확정 " + target.status())
+                .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> ClaimAdminRecoveryPolicy.requireCompletion(rejected, target)).as("종결 " + target.status())
+                .isInstanceOf(IllegalStateException.class);
+        }
+        assertThat(ClaimAdminRecoveryPolicy.isCompletionCandidate(rejected)).isFalse();
+        assertThat(ClaimAdminRecoveryPolicy.isCancellationRejectionCandidate(rejected)).as("다시 거절").isFalse();
+        assertThatThrownBy(() -> requireRejection(rejected, order, List.of(rejected), OrderStatus.PREPARING, OrderStatus.CANCEL_REQUESTED,
+            RECORDED_PAYMENT_ID)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> requireRejection(failed, restored, List.of(rejected), OrderStatus.PREPARING, OrderStatus.CANCEL_REQUESTED,
+            RECORDED_PAYMENT_ID)).as("주문이 이미 되돌아갔다").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> rejected.reopen(NOW.plusSeconds(60), 0)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> rejected.confirmRefundByAdmin(new Claim.Decision("확인", 9, NOW, "PAYMENT_017"), NOW)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> rejected.markRefunded(NOW)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> rejected.markConfirmedRefund(NOW)).isInstanceOf(IllegalStateException.class);
     }
 
     @Test

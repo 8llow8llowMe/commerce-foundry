@@ -23,6 +23,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ClaimTest {
 
@@ -384,6 +385,96 @@ class ClaimTest {
         assertThatThrownBy(() -> failed.completeByAdmin(null)).isInstanceOf(NullPointerException.class);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"PAYMENT_016", "PAYMENT_017", "PAYMENT_019", "PAYMENT_001"})
+    @DisplayName("취소 거절 — 결제사가 거절한 저장된 REFUND_FAILED 취소만 REJECTED(다음 시각 · 실패 코드 없음)로 가고, 결제 · 환불액 · 횟수는 두며 결정에 직전 실패 코드를 남긴다 (#17 A4)")
+    void rejectCancellation(String code) {
+        Claim failed = requested().retryLater(NOW, MINUTE, HOUR).failRefund(code);
+        Claim.Decision decision = new Claim.Decision("결제사 콘솔에서 무환불 확인", 9, NOW, code);
+
+        Claim rejected = failed.rejectCancellation(decision);
+
+        assertThat(rejected.status()).isEqualTo(Claim.Status.REJECTED);
+        assertThat(rejected.failureCode()).isNull();
+        assertThat(rejected.nextAttemptAt()).isNull();
+        assertThat(rejected.decision()).isEqualTo(decision);
+        assertThat(rejected.decision().previousFailureCode()).isEqualTo(code);
+        assertThat(rejected.paymentId()).isEqualTo(failed.paymentId()).isEqualTo(77L);
+        assertThat(rejected.expectedRefund()).isEqualTo(failed.expectedRefund());
+        assertThat(rejected.attemptCount()).isEqualTo(failed.attemptCount()).isEqualTo(1);
+        assertThat(rejected).usingRecursiveComparison().ignoringFields("status", "failureCode", "nextAttemptAt", "decision").isEqualTo(failed);
+        assertThat(rejected.hasSameRefundRequest(failed)).isTrue();
+        assertThat(rejected.isRejectedCancellation()).isTrue();
+        assertThat(rejected.isOpenCancellation()).isFalse();
+        assertThat(rejected.isSettledCancellation()).isFalse();
+        assertThat(rejected.hasRecordedRefund()).isFalse();
+    }
+
+    @Test
+    @DisplayName("취소 거절은 결과 미확인 환불 실패 · 환불 대기 · 환불 완료 · 복원 실패 · 완료 · 이미 거절 · 반품 · 저장 전 · 직전 실패 코드가 다른 결정 · 결정 없음을 거부한다 (#17 A4)")
+    void rejectCancellationRejections() {
+        Claim unconfirmed = requested().failRefund(Claim.REFUND_UNCONFIRMED);
+        assertThatThrownBy(() -> unconfirmed.rejectCancellation(new Claim.Decision("확인", 9, NOW, Claim.REFUND_UNCONFIRMED)))
+            .as("결과 미확인은 돈이 나갔을 수 있다").isInstanceOf(IllegalStateException.class);
+
+        Claim requested = requested();
+        Claim refunded = requested.markRefunded(NOW);
+        for (Claim claim : List.of(requested, refunded, refunded.complete(), refunded.failRestoration("PRODUCT_028"))) {
+            String previous = claim.failureCode() == null ? "PAYMENT_016" : claim.failureCode();
+            assertThatThrownBy(() -> claim.rejectCancellation(new Claim.Decision("확인", 9, NOW, previous))).as(claim.status().name())
+                .isInstanceOf(IllegalStateException.class);
+        }
+
+        Claim failed = requested().failRefund("PAYMENT_016");
+        assertThatThrownBy(() -> failed.rejectCancellation(new Claim.Decision("확인", 9, NOW, "PAYMENT_019")))
+            .as("화면이 본 실패와 지금 실패가 다르다").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> failed.rejectCancellation(new Claim.Decision("확인", 9, NOW, null)))
+            .as("직전 실패 코드 없는 결정").isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> failed.rejectCancellation(null)).isInstanceOf(NullPointerException.class);
+        Claim rejected = failed.rejectCancellation(new Claim.Decision("확인", 9, NOW, "PAYMENT_016"));
+        assertThatThrownBy(() -> rejected.rejectCancellation(new Claim.Decision("확인", 9, NOW, "PAYMENT_016"))).as("이미 거절")
+            .isInstanceOf(IllegalStateException.class);
+
+        Claim unsaved = new Claim(failed.id(), failed.orderId(), failed.requestKey(), failed.type(), failed.status(), failed.expectedRefund(), failed.paymentId(),
+            0, null, "PAYMENT_016", failed.items(), null, null);
+        assertThatThrownBy(() -> unsaved.rejectCancellation(new Claim.Decision("확인", 9, NOW, "PAYMENT_016"))).isInstanceOf(IllegalStateException.class);
+
+        Claim.ReturnApproval approval = new Claim.ReturnApproval(CUSTOMER, true, krw(0), 9, NOW);
+        for (String code : List.of("PAYMENT_017", Claim.REFUND_BLOCKED_CODE)) {
+            Claim failedReturn = returnClaim(Claim.Status.REFUND_FAILED, krw(1_000), 77L, null, code, approval);
+            assertThatThrownBy(() -> failedReturn.rejectCancellation(new Claim.Decision("확인", 9, NOW, code))).as("반품 " + code)
+                .isInstanceOf(IllegalStateException.class);
+        }
+        assertThatThrownBy(() -> returnRequested().rejectCancellation(new Claim.Decision("확인", 9, NOW, "PAYMENT_016"))).isInstanceOf(IllegalStateException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(Claim.Status.class)
+    @DisplayName("거절된 취소 술어는 REJECTED 취소뿐이다 — 거절된 반품 · 다른 상태 취소는 아니다. 거절된 취소는 취소 수량 합산에서 빠진다 (#17 A4)")
+    void rejectedCancellationPredicate(Claim.Status status) {
+        if (status != Claim.Status.APPROVED) {
+            Claim claim = cancellation(status, Claim.Type.CANCELLATION.isAwaitingAttempt(status) ? NOW : null, status.isFailed() ? "PAYMENT_016" : null,
+                List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER)));
+            assertThat(claim.isRejectedCancellation()).isEqualTo(status == Claim.Status.REJECTED);
+            assertThat(claim.reservesCancellationQuantity()).isEqualTo(!claim.isRejectedCancellation());
+        }
+        boolean approvedOrLater = status != Claim.Status.REQUESTED && status != Claim.Status.REJECTED;
+        Claim returnClaim = returnClaim(status, approvedOrLater ? krw(1_000) : null, approvedOrLater ? 77L : null,
+            Claim.Type.RETURN.isAwaitingAttempt(status) ? NOW : null, status.isFailed() ? "PAYMENT_016" : null,
+            approvedOrLater ? new Claim.ReturnApproval(CUSTOMER, true, krw(0), 9, NOW) : null);
+        assertThat(returnClaim.isRejectedCancellation()).isFalse();
+    }
+
+    @Test
+    @DisplayName("취소 거절로 닫힌 클레임은 영속 어댑터의 취소 수량 합산 상태 집합 밖이다 — 열린 취소 수량으로 세지 않는다(고객 재취소 허용 여부는 PR-2 의 ORDER_055) (#17 A4)")
+    void rejectedCancellationLeavesQuantitySum() {
+        Claim rejected = requested().failRefund("PAYMENT_019").rejectCancellation(new Claim.Decision("무환불 확인", 9, NOW, "PAYMENT_019"));
+
+        assertThat(Claim.cancellationQuantityReservingStatuses()).doesNotContain(rejected.status());
+        assertThat(rejected.reservesCancellationQuantity()).isFalse();
+        assertThat(rejected.items()).as("항목 수량은 그대로 남는다 — 합산이 상태로 거른다").isEqualTo(requested().items());
+    }
+
     @Test
     @DisplayName("반품 승인 — 저장된 REQUESTED 반품만 APPROVED 로 가고, 환불액 · 차감액 · 통화는 정책 결과 하나에서, 다음 시각은 now + lease(마이크로초)다 (#17 B1)")
     void approveReturn() {
@@ -559,7 +650,7 @@ class ClaimTest {
     }
 
     @Test
-    @DisplayName("취소 클레임은 APPROVED · 승인 기록을 두지 않는다 — 거절 상태 취소는 막지 않는다(A4 몫)")
+    @DisplayName("취소 클레임은 APPROVED · 승인 기록을 두지 않는다 — 거절 상태 취소는 막지 않는다(취소 거절 A4 의 결과)")
     void typeSpecificInvariants() {
         List<ClaimItem> items = List.of(new ClaimItem(3, 11, 1, ClaimItem.Reason.OTHER));
         assertThatThrownBy(() -> cancellation(Claim.Status.APPROVED, NOW, null, items)).isInstanceOf(IllegalArgumentException.class);

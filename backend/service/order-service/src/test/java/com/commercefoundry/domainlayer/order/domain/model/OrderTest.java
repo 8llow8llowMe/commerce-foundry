@@ -485,7 +485,7 @@ class OrderTest {
     }
 
     @Test
-    @DisplayName("취소 요청 → 결제 완료는 취소 정리만 한다 — 일반 상태 변경 · 결제 완료 반영(markPaid)은 거절한다 (#684)")
+    @DisplayName("취소 요청 → 결제 완료는 취소 정리 · 취소 거절만 한다 — 일반 상태 변경 · 결제 완료 반영(markPaid)은 거절한다 (#684 · #17 A4)")
     void paidFromCancelRequestedOnlyBySettlement() {
         Order requested = withStatus(OrderStatus.PREPARING).requestCancellation();
 
@@ -496,6 +496,78 @@ class OrderTest {
         });
         assertThatThrownBy(() -> requested.markPaid(99L)).isInstanceOf(OrderStatusTransitionException.class);
         assertThat(AdminStatusChangePolicy.decide(requested, OrderStatus.PAID)).isEqualTo(AdminStatusChangePolicy.Decision.NOT_MANUAL);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, names = {"PAID", "MAKING", "PREPARING"})
+    @DisplayName("취소 거절 — 저장된 취소 요청만 결제 완료 · 제작 중 · 상품 준비중으로 되돌리고 나머지 값은 그대로다. 일반 상태 변경은 같은 전이를 거절한다 (#17 A4)")
+    void rejectCancellationRestores(OrderStatus restoreTo) {
+        Order requested = withStatus(OrderStatus.CANCEL_REQUESTED);
+
+        Order restored = requested.rejectCancellation(restoreTo);
+
+        assertThat(restored.status()).isEqualTo(restoreTo);
+        assertThat(restored).usingRecursiveComparison().ignoringFields("status").isEqualTo(requested);
+        assertThatThrownBy(() -> requested.changeStatus(restoreTo)).as("changeStatus 는 취소 요청에서 되돌리지 않는다")
+            .isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+                assertThat(exception.getCurrentStatus()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+                assertThat(exception.getTargetStatus()).isEqualTo(restoreTo);
+            });
+        assertThat(AdminStatusChangePolicy.decide(requested, restoreTo)).isEqualTo(AdminStatusChangePolicy.Decision.NOT_MANUAL);
+        assertThatThrownBy(() -> restored.rejectCancellation(restoreTo)).as("멱등 분기가 없다 — 되돌린 뒤 다시 부르면 전이 예외")
+            .isInstanceOf(OrderStatusTransitionException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = {"PAID", "MAKING", "PREPARING"})
+    @DisplayName("취소 거절의 목표는 결제 완료 · 제작 중 · 상품 준비중만이다 — 그 밖(취소 완료 · 출고 이후 · 결제 대기 등)은 도메인 전이 예외다 (#17 A4)")
+    void rejectCancellationRejectsOtherTargets(OrderStatus target) {
+        Order requested = withStatus(OrderStatus.CANCEL_REQUESTED);
+
+        assertThatThrownBy(() -> requested.rejectCancellation(target)).isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+            assertThat(exception.getCurrentStatus()).isEqualTo(OrderStatus.CANCEL_REQUESTED);
+            assertThat(exception.getTargetStatus()).isEqualTo(target);
+        });
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = OrderStatus.class, mode = EnumSource.Mode.EXCLUDE, names = "CANCEL_REQUESTED")
+    @DisplayName("취소 요청이 아닌 주문의 취소 거절은 도메인 전이 예외다 — 이미 목표 상태(결제 완료 등)여도 그대로 돌려주지 않는다 (#17 A4)")
+    void rejectCancellationRequiresCancelRequested(OrderStatus status) {
+        Order order = withStatus(status);
+
+        for (OrderStatus restoreTo : EnumSet.of(OrderStatus.PAID, OrderStatus.MAKING, OrderStatus.PREPARING)) {
+            assertThatThrownBy(() -> order.rejectCancellation(restoreTo)).as("%s → %s", status, restoreTo)
+                .isInstanceOfSatisfying(OrderStatusTransitionException.class, exception -> {
+                    assertThat(exception.getCurrentStatus()).isEqualTo(status);
+                    assertThat(exception.getTargetStatus()).isEqualTo(restoreTo);
+                });
+        }
+    }
+
+    @Test
+    @DisplayName("저장 전 취소 요청 주문은 취소 거절하지 않고, 목표가 없으면 NPE 다 (#17 A4)")
+    void rejectCancellationRequiresStoredOrderAndTarget() {
+        Order requested = withStatus(OrderStatus.CANCEL_REQUESTED);
+        Order unsaved = new Order(requested.id(), requested.memberId(), OrderStatus.CANCEL_REQUESTED, requested.quote(), requested.itemIds(),
+            requested.shippingAddress(), requested.stockReservationId(), requested.paymentDueAt(), null, null, null, null);
+
+        assertThatThrownBy(() -> unsaved.rejectCancellation(OrderStatus.PAID)).isInstanceOf(OrderStatusTransitionException.class);
+        assertThatThrownBy(() -> requested.rejectCancellation(null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("changeStatus 는 취소 요청 → 결제 완료 · 제작 중 · 상품 준비중을 계속 거절하고, 출고 뒤 멱등 범위는 취소 거절 전이와 무관하다 (#17 A4)")
+    void changeStatusKeepsRejectingCancelRequestedRestore() {
+        Order requested = withStatus(OrderStatus.CANCEL_REQUESTED);
+
+        for (OrderStatus target : EnumSet.of(OrderStatus.PAID, OrderStatus.MAKING, OrderStatus.PREPARING)) {
+            assertThat(OrderStatus.CANCEL_REQUESTED.canTransitionTo(target)).as("표에는 있다: %s", target).isTrue();
+            assertThatThrownBy(() -> requested.changeStatus(target)).as(target.name()).isInstanceOf(OrderStatusTransitionException.class);
+        }
+        assertThat(reachableFrom(OrderStatus.SHIPPING)).as("출고 뒤에서 취소 요청으로 닿지 않는다 — SHIPPED_OR_LATER 는 그대로다")
+            .containsExactlyInAnyOrder(OrderStatus.SHIPPING, OrderStatus.DELIVERED, OrderStatus.PURCHASE_CONFIRMED, OrderStatus.RETURN_REQUESTED,
+                OrderStatus.RETURNED);
     }
 
     @Test
