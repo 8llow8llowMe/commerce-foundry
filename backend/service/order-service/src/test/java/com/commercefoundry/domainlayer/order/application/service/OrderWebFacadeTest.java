@@ -4,6 +4,14 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.commercefoundry.common.dto.Response;
+import com.commercefoundry.common.dto.item.MoneyItem;
+import com.commercefoundry.common.dto.metadata.CodeNameDescriptionMetadata;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.ProductSkuClientAdapter;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.ProductSkuClient;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalItem;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalResponse;
+import com.commercefoundry.domainlayer.catalog.adapter.out.client.support.ProductInternalResponseSupport;
 import com.commercefoundry.domainlayer.catalog.application.service.processor.CatalogSkuProcessor;
 import com.commercefoundry.domainlayer.catalog.domain.model.CatalogSku;
 import com.commercefoundry.domainlayer.order.adapter.in.web.presenter.OrderWebPresenter;
@@ -12,6 +20,7 @@ import com.commercefoundry.domainlayer.order.application.exception.OrderErrorCod
 import com.commercefoundry.domainlayer.order.application.exception.OrderException;
 import com.commercefoundry.domainlayer.order.application.exception.OrderSaveException;
 import com.commercefoundry.domainlayer.order.application.model.OrderRequestClaim;
+import com.commercefoundry.domainlayer.order.application.port.out.ShippingFeeQueryPort;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderQuoteProcessor;
 import com.commercefoundry.domainlayer.order.application.service.processor.OrderRequestProcessor;
@@ -20,6 +29,8 @@ import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderRequest;
 import com.commercefoundry.domainlayer.order.domain.model.OrderRequestItem;
 import com.commercefoundry.domainlayer.order.support.OrderFixtures;
+import com.commercefoundry.global.properties.OrderQuantityLimitProperties;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -225,5 +236,38 @@ class OrderWebFacadeTest {
             ex -> assertThat(ex.getErrorCode().getCode()).isEqualTo("ORDER_018"));
         verify(requests).endLeaseQuietly(owned);
         verify(orders, never()).getOwned(anyLong(), anyLong());
+    }
+
+    /**
+     * #20 B4b(D8) 계약 — PRICE_BOOK 의 product-service 는 가격 원천을 해석하지 못한 상품의 SKU 를 internal 응답에서 뺀다(성공 응답).
+     * 주문 생성은 그 SKU 를 없는 SKU 로 보고 409 ORDER_003 으로 거절하며 기록 · 선점을 하지 않는다. 성공 응답이라 서킷 실패로 세지 않는다 —
+     * 상품 하나 때문에 product 서킷이 열려 다른 주문 · 장바구니가 막히지 않는다. product 응답 → catalog adapter · Processor → 견적을 실제 객체로 잇는다.
+     */
+    @Test
+    @DisplayName("product internal 응답에서 요청 SKU 가 빠지면 주문 생성은 ORDER_003 으로 거절되고 기록 · 선점이 없으며 서킷 실패로 세지 않는다 (#20 B4b)")
+    void skuMissingFromProductResponseRejectsOrderBeforeClaim() {
+        var client = mock(ProductSkuClient.class);
+        when(client.getSkus(List.of(9101L, 9102L))).thenReturn(Response.success(new ProductSkuInternalResponse(List.of(
+            new ProductSkuInternalItem("9101", "7101", "저고리", "", MoneyItem.of(39_000, "KRW"),
+                CodeNameDescriptionMetadata.of("ON_SALE", "판매중", "구매할 수 있습니다."), true, null, false, null, null)))));
+        var circuitBreakers = CircuitBreakerRegistry.ofDefaults();
+        var catalog = new CatalogSkuProcessor(new ProductSkuClientAdapter(client, new ProductInternalResponseSupport(circuitBreakers)));
+        var quotes = new OrderQuoteProcessor(mock(ShippingFeeQueryPort.class), new OrderQuantityLimitProperties(10));
+        var requests = mock(OrderRequestProcessor.class);
+        var stocks = mock(OrderStockProcessor.class);
+        var orders = mock(OrderProcessor.class);
+        var facade = new OrderWebFacade(catalog, quotes, requests, stocks, orders, mock(OrderWebPresenter.class));
+        var command = new OrderCreateCommand(List.of(OrderFixtures.line(9101, 1), OrderFixtures.line(9102, 1)), OrderFixtures.address("KR"), null);
+        UUID key = UUID.randomUUID();
+        when(requests.check(2, key, command.fingerprint())).thenReturn(OrderRequestClaim.none());
+
+        assertThatThrownBy(() -> facade.create(2, key, command)).isInstanceOfSatisfying(OrderException.class, ex -> {
+            assertThat(ex.getErrorCode()).isEqualTo(OrderErrorCode.ITEM_NOT_PURCHASABLE);
+            assertThat(ex.getMessage()).doesNotContain("9102");
+        });
+        verify(requests, never()).acquire(anyLong(), any(), any(), any(), any());
+        verifyNoInteractions(stocks);
+        verify(orders, never()).create(anyLong(), any(), any(), any(), any());
+        assertThat(circuitBreakers.circuitBreaker("product-service").getMetrics().getNumberOfFailedCalls()).isZero();
     }
 }

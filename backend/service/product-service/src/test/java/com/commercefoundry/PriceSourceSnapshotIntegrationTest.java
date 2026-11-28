@@ -13,8 +13,11 @@ import com.commercefoundry.common.dto.item.MoneyItem;
 import com.commercefoundry.domainlayer.category.adapter.out.persistence.CategoryRepositoryAdapter;
 import com.commercefoundry.domainlayer.category.application.mapper.CategoryMapperImpl;
 import com.commercefoundry.domainlayer.category.application.service.processor.CategoryProcessor;
+import com.commercefoundry.domainlayer.product.adapter.in.internal.dto.item.SkuInternalItem;
+import com.commercefoundry.domainlayer.product.adapter.in.internal.presenter.SkuInternalPresenter;
 import com.commercefoundry.domainlayer.product.adapter.in.web.dto.item.ProductSkuItem;
 import com.commercefoundry.domainlayer.product.adapter.in.web.presenter.ProductWebPresenter;
+import com.commercefoundry.domainlayer.product.adapter.out.observation.PriceSourceMetricsAdapter;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.PriceSourceSnapshotRepositoryAdapter;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.ProductCustomOrderFieldRepositoryAdapter;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.ProductImageRepositoryAdapter;
@@ -31,11 +34,14 @@ import com.commercefoundry.domainlayer.product.application.mapper.ProductOptionM
 import com.commercefoundry.domainlayer.product.application.mapper.SkuMapperImpl;
 import com.commercefoundry.domainlayer.product.application.mapper.StockMapperImpl;
 import com.commercefoundry.domainlayer.product.application.port.in.ProductWebUseCase;
+import com.commercefoundry.domainlayer.product.application.port.in.SkuInternalUseCase;
 import com.commercefoundry.domainlayer.product.application.port.out.PriceSourceSnapshotRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.service.ProductWebFacade;
+import com.commercefoundry.domainlayer.product.application.service.SkuInternalFacade;
 import com.commercefoundry.domainlayer.product.application.service.processor.PriceSourceSnapshotResolver;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductDetailProcessor;
 import com.commercefoundry.domainlayer.product.application.service.processor.ProductListProcessor;
+import com.commercefoundry.domainlayer.product.application.service.processor.SkuInternalProcessor;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
@@ -46,6 +52,8 @@ import com.commercefoundry.persistence.config.QuerydslConfigurer;
 import com.commercefoundry.persistence.config.SnowflakeConfigurer;
 import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
 import com.commercefoundry.shared.commerce.Money;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.persistence.EntityManager;
 import java.util.ArrayList;
 import java.util.List;
@@ -86,7 +94,9 @@ import org.springframework.transaction.support.TransactionTemplate;
     ProductRepositoryAdapter.class, ProductOptionRepositoryAdapter.class, SkuRepositoryAdapter.class, StockRepositoryAdapter.class,
     ProductImageRepositoryAdapter.class, ProductCustomOrderFieldRepositoryAdapter.class, CategoryRepositoryAdapter.class,
     ProductOptionMapperImpl.class, StockMapperImpl.class, ProductImageMapperImpl.class, ProductCustomOrderFieldMapperImpl.class, CategoryMapperImpl.class,
-    SnowflakePropertiesConfig.class, SnowflakeConfigurer.class})
+    SnowflakePropertiesConfig.class, SnowflakeConfigurer.class,
+    // 서비스 간 SKU 조회 Facade(#20 B4b)와 지표 어댑터. 슬라이스에는 Micrometer 자동 구성이 없어 이 컨텍스트 전용 레지스트리를 둔다(기본 생성자)
+    SkuInternalFacade.class, SkuInternalProcessor.class, SkuInternalPresenter.class, PriceSourceMetricsAdapter.class, SimpleMeterRegistry.class})
 @EnableConfigurationProperties({StoreProperties.class, PriceSourceProperties.class})
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -95,6 +105,9 @@ class PriceSourceSnapshotIntegrationTest {
     @Autowired PriceSourceSnapshotRepositoryPort port;
     @Autowired ProductWebUseCase productWebUseCase;
     @Autowired ProductDetailProcessor productDetailProcessor;
+    @Autowired SkuInternalUseCase skuInternalUseCase;
+    @Autowired SkuInternalProcessor skuInternalProcessor;
+    @Autowired MeterRegistry meterRegistry;
     @Autowired DataSource dataSource;
     @Autowired PlatformTransactionManager manager;
     @Autowired EntityManager em;
@@ -274,11 +287,49 @@ class PriceSourceSnapshotIntegrationTest {
     }
 
     /**
-     * 싱글턴 상세 Processor 의 가격 원천 모드를 PRICE_BOOK 으로 잠깐 바꿔 부른다. 컨텍스트 프로퍼티 · 빈 정의를 바꾸지 않으려고 필드만 교체하고,
+     * B4b 생산 경로 — 실제 {@link SkuInternalUseCase} 프록시(read-only · REPEATABLE_READ)가 연 TX 안에서 PRICE_BOOK 서비스 간 SKU 조회가 참여 snapshot 을 읽는다.
+     * drift 상품의 SKU 만 응답에서 빠지고(D8) 나머지는 요청 순서 · 투영 가격 그대로이며, 뺀 상품은 사유 태그 카운터에 한 번 잡힌다.
+     * 예외 없이 끝나는 것이 {@code getSkus} 의 TX 속성이 어댑터의 참여 사전조건을 만족한다는 증명이다.
+     */
+    @Test
+    void priceBookInternalSkusThroughTheFacadeProxyExcludeOnlyTheDriftedProduct() {
+        seedVisibleProduct(1);
+        sku(10, 1, "KRW", false);
+        sku(11, 1, "KRW", false);
+        jdbc.update("update product.sku set additional_price_amount=500 where id=10");
+        productPrice(100, 1, "KRW", 1_000);
+        skuPrice(200, 10, "KRW", 500);
+        skuPrice(201, 11, "KRW", 0);
+        // 상품 2 는 legacy 판매가(1,000)와 가격행(1,001)이 어긋난다
+        seedVisibleProduct(2);
+        sku(20, 2, "KRW", false);
+        productPrice(101, 2, "KRW", 1_001);
+        skuPrice(202, 20, "KRW", 0);
+        double driftBefore = excludedProducts("LEGACY_DRIFT");
+
+        var response = inPriceBookMode(skuInternalProcessor, () -> skuInternalUseCase.getSkus(List.of(20L, 10L, 11L)));
+
+        assertThat(response.skus()).extracting(SkuInternalItem::skuId, SkuInternalItem::salePrice, SkuInternalItem::additionalPrice).containsExactly(
+            tuple("10", new MoneyItem(1_500, "KRW"), new MoneyItem(500, "KRW")),
+            tuple("11", new MoneyItem(1_000, "KRW"), new MoneyItem(0, "KRW")));
+        assertThat(excludedProducts("LEGACY_DRIFT") - driftBefore).isEqualTo(1.0);
+    }
+
+    double excludedProducts(String reason) {
+        var counter = meterRegistry.find(PriceSourceMetricsAdapter.EXCLUDED_PRODUCTS).tag(PriceSourceMetricsAdapter.REASON_TAG, reason).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    <T> T inPriceBookMode(Supplier<T> call) {
+        return inPriceBookMode(productDetailProcessor, call);
+    }
+
+    /**
+     * 싱글턴 Processor 의 가격 원천 모드를 PRICE_BOOK 으로 잠깐 바꿔 부른다. 컨텍스트 프로퍼티 · 빈 정의를 바꾸지 않으려고 필드만 교체하고,
      * 성공 · 실패와 무관하게 원래 값으로 되돌린다 — 다른 시험에 새지 않게 한다.
      */
-    <T> T inPriceBookMode(Supplier<T> call) {
-        Object target = AopTestUtils.getUltimateTargetObject(productDetailProcessor);
+    <T> T inPriceBookMode(Object processor, Supplier<T> call) {
+        Object target = AopTestUtils.getUltimateTargetObject(processor);
         assertThat(AopUtils.isAopProxy(target)).isFalse();
         Object original = ReflectionTestUtils.getField(target, "priceSourceProperties");
         ReflectionTestUtils.setField(target, "priceSourceProperties", new PriceSourceProperties(PriceSourceProperties.Mode.PRICE_BOOK));

@@ -87,6 +87,41 @@ class PriceSourceSnapshotResolverTest {
             valid.productPrices(), valid.skuPrices()), INVALID_LEGACY);
     }
 
+    /** B4b — 상품별 결과. 실패한 상품은 사유만 갖고 나머지는 투영된다. resolve 는 같은 입력을 요청 순서상 처음 실패한 사유로 전체 거절한다. */
+    @Test
+    void resolveEachReportsPerProductOutcomesInRequestOrder() {
+        var input = new PriceSourceSnapshotQueryResult(List.of(3L, 1L, 2L, 4L),
+            List.of(product(1, KRW), product(2, KRW), product(3, KRW), product(4, KRW)),
+            List.of(sku(10, 1, KRW), sku(20, 2, KRW), sku(30, 3, KRW), sku(40, 4, USD)),
+            List.of(price(101, 1, KRW), new ProductCurrencyPrice(102, 2, Money.of(101, KRW), null), price(103, 3, KRW), price(104, 4, KRW)),
+            List.of(extra(201, 10, KRW), extra(202, 20, KRW), extra(204, 40, KRW)));
+
+        var outcomes = PriceSourceSnapshotResolver.resolveEach(input);
+
+        assertThat(outcomes).extracting(PriceSourceSnapshotResolver.Outcome::productId).containsExactly(3L, 1L, 2L, 4L);
+        assertThat(outcomes).extracting(PriceSourceSnapshotResolver.Outcome::failure)
+            .containsExactly(INVALID_PRICE_BOOK, null, LEGACY_DRIFT, INVALID_LEGACY);
+        assertThat(outcomes.get(1).isResolved()).isTrue();
+        assertThat(outcomes.get(1).projection().product().salePrice()).isEqualTo(Money.of(100, KRW));
+        assertThat(outcomes.get(1).projection().skus()).extracting(Sku::id).containsExactly(10L);
+        assertThat(outcomes).filteredOn(outcome -> !outcome.isResolved()).allSatisfy(outcome -> assertThat(outcome.projection()).isNull());
+        assertThat(outcomes.get(0).toString()).isEqualTo("Outcome[failure=INVALID_PRICE_BOOK]");
+        assertThatThrownBy(() -> outcomes.clear()).isInstanceOf(UnsupportedOperationException.class);
+        fails(input, INVALID_PRICE_BOOK);
+    }
+
+    @Test
+    void resolveEachStillRejectsStructuralFailuresForTheWholeBatch() {
+        var valid = valid();
+        failsEach(new PriceSourceSnapshotQueryResult(List.of(1L, 2L), valid.products(), valid.skus(),
+            valid.productPrices(), valid.skuPrices()), PRODUCT_SET_MISMATCH);
+        failsEach(new PriceSourceSnapshotQueryResult(List.of(1L), valid.products(), valid.skus(),
+            valid.productPrices(), List.of(extra(201, 99, KRW))), FOREIGN_ROW);
+        failsEach(new PriceSourceSnapshotQueryResult(List.of(1L), valid.products(), valid.skus(),
+            List.of(price(101, 1, KRW), price(101, 1, KRW)), valid.skuPrices()), INVALID_SNAPSHOT);
+        failsEach(null, INVALID_SNAPSHOT);
+    }
+
     @Test
     void emptyAndSkuFreeSnapshotsAreImmutable() {
         assertThat(PriceSourceSnapshotResolver.resolve(new PriceSourceSnapshotQueryResult(
@@ -122,6 +157,13 @@ class PriceSourceSnapshotResolverTest {
 
     private static void fails(PriceSourceSnapshotQueryResult snapshot, PriceSourceSnapshotResolver.Reason reason) {
         assertThatThrownBy(() -> PriceSourceSnapshotResolver.resolve(snapshot))
+            .isInstanceOf(PriceSourceSnapshotResolver.ResolutionException.class)
+            .hasMessage(reason.name()).hasNoCause()
+            .extracting("reason").isEqualTo(reason);
+    }
+
+    private static void failsEach(PriceSourceSnapshotQueryResult snapshot, PriceSourceSnapshotResolver.Reason reason) {
+        assertThatThrownBy(() -> PriceSourceSnapshotResolver.resolveEach(snapshot))
             .isInstanceOf(PriceSourceSnapshotResolver.ResolutionException.class)
             .hasMessage(reason.name()).hasNoCause()
             .extracting("reason").isEqualTo(reason);
