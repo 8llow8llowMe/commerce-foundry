@@ -579,6 +579,13 @@ compose는 기본 false를 유지한다. 끄면 기존 로그인은 유지되지
 
 auth A1 활성 관리자 API와 payment A3a 관측 API(PR #548)를 먼저 배포하고 기존 internal 서비스 토큰으로 operations의 호출 권한을 확인한다. Hibernate 생성 operations DDL 스냅숏의 `operations.outbox_alert_state` 신규 테이블과 제약을 사람이 먼저 적용한다(`ddl-auto=none`). 실제 operations 배포 프로세스에 `PAYMENT_OUTBOX_ALERT_ENABLED=true`를 주입한다. 저장소에 operations compose 서비스 정의는 없으며 새 Vault 비밀도 없다. messaging 플래그와 독립적으로 켤 수 있다. 초기 1분/간격 1분·임계 5분·반복 억제 1시간·신선도 30초·락 2분과 실패/해소 의미는 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.
 
+### 품절 임박 정기 점검 테이블 (#229 PR-3a)
+
+operations 스키마 스냅숏(`ddl/operations-schema.sql`)에서 신규 `operations.low_stock_alert_state`(점검 워터마크 단일 행, `source='PRODUCT'`)와
+`operations.low_stock_alert_sku`(알린 SKU 추적, 보조 인덱스 없음)의 `create table` · 제약 · 주석만 사람이 먼저 적용한다(`ddl-auto=none`). dev 는 `update` 가 만든다.
+PR-3a 에는 스케줄러가 없어 테이블을 쓰는 코드가 실행되지 않는다. 활성화 게이트 `LOW_STOCK_ALERT_ENABLED`(기본 false)는 PR-3b 에서 생기며,
+켜기 전 순서는 DDL 적용 → operations 전체 배포 → 게이트 ON 이다. 롤백은 게이트 OFF 이며 테이블은 남겨도 무해하다. 새 Vault 비밀 · FE 계약 변경은 없다.
+
 ### DLT 알림 활성화 (#477 A2)
 
 operations 스키마 스냅숏에서 신규 `operations.dlt_alert_state`·`operations.dlt_partition_checkpoint` DDL만 추출해 `DLT_ALERT_ENABLED=true` 활성화 전에 적용한다. `ddl-auto=none`은 테이블을 만들지 않는다. 실제 프로세스에 `MESSAGING_ENABLED=true`·올바른 `KAFKA_NAMESPACE`도 주입한다. 기존 네 DLT와 주문 결제 회신 DLT 두 토픽의 READ/DESCRIBE, namespace가 붙은 `operations.dlt-alerts` 그룹 READ ACL, auth A1 활성 관리자 API·operations internal 서비스 토큰 허용을 확인한다. 두 회신 DLT 토픽은 #308 C3c 배포 시 생성돼야 하며, 없으면 DLT 알림 활성 상태의 operations 기동이 실패한다. 새 비밀 키는 없다. 허용 목록·재시도·롤백·상한·토픽 재생성 대응은 [anomaly-notifications.md](anomaly-notifications.md)를 따른다.

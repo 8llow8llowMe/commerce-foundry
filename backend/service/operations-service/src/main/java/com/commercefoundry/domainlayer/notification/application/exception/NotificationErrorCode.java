@@ -13,6 +13,8 @@ import org.springframework.http.HttpStatus;
 @RequiredArgsConstructor
 public enum NotificationErrorCode {
 
+    LOW_STOCK_OBSERVATION_UNAVAILABLE("NOTIFICATION_053", "품절 임박 재고 상태를 확인할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
+
     PAYMENT_ANOMALY_OBSERVATION_UNAVAILABLE("NOTIFICATION_052", "결제 이상 상태를 확인할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),
 
     OUTBOX_OBSERVATION_UNAVAILABLE("NOTIFICATION_051", "결제 이벤트 발행 상태를 확인할 수 없습니다.", HttpStatus.SERVICE_UNAVAILABLE),

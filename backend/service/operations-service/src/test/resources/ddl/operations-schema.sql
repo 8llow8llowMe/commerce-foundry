@@ -544,6 +544,71 @@
     comment on column operations.legal_draft_generation_receipt.member_id is
         '요청자 식별자 (FK: auth.member.id)';
 
+    create table operations.low_stock_alert_sku (
+        sku_id bigint not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        missing_since timestamp(6) with time zone,
+        version bigint not null,
+        primary key (sku_id),
+        constraint ck_low_stock_alert_sku_id check (sku_id > 0)
+    );
+
+    comment on table operations.low_stock_alert_sku is
+        '품절 임박 알림을 보낸 SKU 추적';
+
+    comment on column operations.low_stock_alert_sku.sku_id is
+        'SKU (외부 FK: product-service sku.id)';
+
+    comment on column operations.low_stock_alert_sku.created_at is
+        '생성 시각';
+
+    comment on column operations.low_stock_alert_sku.updated_at is
+        '수정 시각';
+
+    comment on column operations.low_stock_alert_sku.missing_since is
+        '완전 스캔에서 처음 빠진 로컬 시각. 다시 보이면 비운다';
+
+    comment on column operations.low_stock_alert_sku.version is
+        '낙관적 락 버전';
+
+    create table operations.low_stock_alert_state (
+        source varchar(16) not null,
+        created_at timestamp(6) with time zone not null,
+        updated_at timestamp(6) with time zone not null,
+        last_accepted_local_at timestamp(6) with time zone not null,
+        last_alert_at timestamp(6) with time zone,
+        last_observed_at timestamp(6) with time zone not null,
+        version bigint not null,
+        primary key (source),
+        constraint ck_low_stock_alert_state_source check (source = 'PRODUCT'),
+        constraint ck_low_stock_alert_state_alert check (last_alert_at is null or last_alert_at <= last_accepted_local_at)
+    );
+
+    comment on table operations.low_stock_alert_state is
+        '품절 임박 정기 점검 워터마크 (단일 행)';
+
+    comment on column operations.low_stock_alert_state.source is
+        '허용된 관측 원천';
+
+    comment on column operations.low_stock_alert_state.created_at is
+        '생성 시각';
+
+    comment on column operations.low_stock_alert_state.updated_at is
+        '수정 시각';
+
+    comment on column operations.low_stock_alert_state.last_accepted_local_at is
+        '마지막 수락 로컬 시각';
+
+    comment on column operations.low_stock_alert_state.last_alert_at is
+        '마지막 알림 로컬 시각';
+
+    comment on column operations.low_stock_alert_state.last_observed_at is
+        '마지막 수락 원천 시각 (첫 페이지 관측 시각)';
+
+    comment on column operations.low_stock_alert_state.version is
+        '낙관적 락 버전';
+
     create table operations.notification (
         id bigint not null,
         created_at timestamp(6) with time zone not null,
