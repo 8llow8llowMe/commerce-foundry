@@ -1219,8 +1219,9 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 | `POST /api/v1/admin/product-drafts` | `CATALOG_MANAGE` | 201 초안 — 생성 시작 성공이면 `GENERATING`, 시작 실패 · 플래그 닫힘이면 `REQUESTED` | 400 `PRODUCT_DRAFT_030` · `031` · `033` · `034` · `035` · `036` · `037` · `101~126` · `PRODUCT_100` · 503 `PRODUCT_DRAFT_032` · `501` |
 | `GET /api/v1/admin/product-drafts/{draftId}` | `CATALOG_READ` | 200 초안 | 404 `PRODUCT_DRAFT_001` · 400 `PRODUCT_DRAFT_127` |
 | `POST /api/v1/admin/product-drafts/{draftId}/reject` | `CATALOG_MANAGE` | 200 초안 — 거절(`REJECTED`). 이미 거절했으면 그대로 200 | 404 `PRODUCT_DRAFT_001` · 409 `PRODUCT_DRAFT_020`(적용함) · `022`(만료) · `025`(동시 변경) · 400 `PRODUCT_DRAFT_127` |
-| `POST /api/v1/admin/product-drafts/{draftId}/generate` | `CATALOG_MANAGE` | 200 초안 — 생성 시작 · 같은 회차 등록 재시도. 이미 생성 중이면 그대로 200 | 400 `PRODUCT_DRAFT_037` · `050` · `127` · 404 `001` · 409 `022` · `025` · `051` · `052` · 502 `504` · 503 `502` |
+| `POST /api/v1/admin/product-drafts/{draftId}/generate` | `CATALOG_MANAGE` | 200 초안 — 생성 시작 · 같은 회차 등록 재시도. 이미 생성 중이면 그대로 200 | 400 `PRODUCT_DRAFT_037` · `050` · `127` · 404 `001` · 409 `022` · `025` · `051` · `052` · `053` · 502 `504` · 503 `502` |
 | `POST /api/v1/admin/product-drafts/{draftId}/refresh` | `CATALOG_MANAGE` | 200 초안 — 작업 결과를 현재 회차에 반영 | 400 `PRODUCT_DRAFT_050` · `127` · 404 `001` · 409 `022` · `025` · 502 `504` · 503 `502` |
+| `POST /api/v1/admin/product-drafts/{draftId}/regenerate` | `CATALOG_MANAGE` | 200 초안 — 본문 `{generationNo}`(화면의 지금 회차). 다음 회차 시작. 이미 다음 회차를 시작했으면 그대로 200 | 400 `PRODUCT_DRAFT_037` · `050` · `127~129` · 404 `001` · 409 `022` · `025` · `051` · `052` · `053` · `054` · `055` · 502 `504` · 503 `502` |
 
 - **본문(생성)**: `{nameHint?, categoryId?, materials?[], careNotes?[], measurementsNote?, origin?, certifications?[], tone?, mustInclude?[], mustAvoid?[], images?[{url, imageType, width?, height?}]}`.
   모든 칸이 선택이다. 문구는 앞뒤 공백을 빼고 빈 문구는 null 이다. 한 줄 문구는 제어 문자를, 치수 메모는 개행 · 탭 외 제어 문자를 받지 않는다(입력은 AI 프롬프트의 데이터 칸으로만 쓰인다).
@@ -1242,7 +1243,8 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   상품 등록용으로 직접 올린 상품 사진(이미 공개 확정한 `products/media` 객체)이고, 초안 결과가 운영자 검토를 거쳐서만 상품에 들어가기 때문이다.
   대신 **사진에 고객 정보(이름 · 연락처 · 주소 · 주문 화면 · 송장)를 넣지 않는다** — 이미지 안의 글자는 마스킹되지 않고 AI 에 그대로 간다. 어드민 화면은 업로드 칸에 이 안내를 둔다.
 - **응답**: `{draftId, status{code,name,description}, facts{...입력 그대로}, images[{url, imageType, width, height}], missingRequiredInputs[{code,name,description}],
-  requestedByMemberId, requestedAt, expiresAt, rejectedAt, result?, failureNotice?}`. `missingRequiredInputs` 는 서버가 운영자 입력으로 계산한다(AI 출력이 아니다) — `PRODUCT_NAME` → `CATEGORY` →
+  requestedByMemberId, requestedAt, expiresAt, rejectedAt, result?, failureNotice?, generationNo, regenerationAvailable}`.
+  `generationNo` 는 지금 회차(0 = 시작 전, 최대 3)이고 `regenerationAvailable` 은 지금 '다시 생성'을 할 수 있는지다(B3 — 아래 재생성 문단). `missingRequiredInputs` 는 서버가 운영자 입력으로 계산한다(AI 출력이 아니다) — `PRODUCT_NAME` → `CATEGORY` →
   `THUMBNAIL_IMAGE` 순이고, 가격 · 옵션 · 재고는 초안이 담지 않아 적용 단계에서 입력한다. 카테고리 존재는 적용 때 상품 등록 검증이 본다.
 - **상태**: `REQUESTED`(생성 대기) → `GENERATING`(생성 중) → `READY`(검토 대기) / `FAILED`(생성 실패) → `APPLIED`(적용 완료) / `REJECTED`(거절). 끝나지 않은 초안
   (`REQUESTED` · `GENERATING` · `READY` · `FAILED`)이 보관 기간(`product-draft.ttl`, 7일)을 넘으면 저장 값과 상관없이 `EXPIRED`(기간 만료)로 보이고 적용 · 거절할 수 없다 —
@@ -1254,7 +1256,7 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   operations 영수증은 `(draftId, generationNo)` 와 고정한 hash · 요청자 · 만료 시각으로 재생한다. 등록 응답과 같은 초안 · 회차 · hash 인지 검증한 뒤 jobId 를 붙인다.
   등록과 bind 사이에 거절되면 거절 상태를 유지한 채 jobId 만 기록한다. 등록 응답이 유실된 뒤 거절됐으면 추가 작업을 만들지 않으려고 `/generate` 를 막는다;
   operations 에 남은 작업은 거절된 입력 조회에서 실패하며 product 는 바뀌지 않는다.
-  플래그 기본값은 false 이며 B3 동시 3건 게이트와 재생성이 연결되기 전까지 열지 않는다.
+  플래그 기본값은 false 이며 상품 적용(C2)과 운영 검증 전까지 열지 않는다.
 - **결과 반영(B2b)** — 상세 GET은 저장 값만 읽는다. refresh는 JWT 행위자로 감사(`PRODUCT_DRAFT_REFRESH`)를 한 번 남기며 두 응답 모두 `Cache-Control: no-store`다.
   refresh는 기한이 남은 `GENERATING` 초안과 연결된 작업을 대상으로 하고 이 경우 기존 생성 플래그가 닫혀 있으면 400 `050`이다. 다른 상태는 저장 값을 반환하며 초안 만료는 409 `022`다.
   operations 결과 조회(§7-3)는 트랜잭션 밖에서 한 번 실행한다. 새 저장 트랜잭션에서 초안 · 회차 · 작업 · 입력 해시와 현재 만료 · 상태를 다시 검사한다.
@@ -1263,7 +1265,22 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
   같은 회차가 먼저 확정되었거나 거절되었으면 그 상태를 반환한다. 회차가 바뀌거나 다시 충돌하면 409 `025`, 보관 기한이 지났으면 409 `022`다.
   `READY`의 `result`는 `{suggestion{name,description,searchTags,seoTitle,seoDescription,imageAlts[{index,altText}]},unconfirmedFacts[{code,name,description}],warnings[{code,name,description,index}]}`다.
   경고 순번은 `mustInclude` 또는 `mustAvoid`의 순번이며 정제된 제안과 정규화한 표현을 비교해 계산한다. `FAILED`는 `failureNotice`로 안내한다. 그 외 상태는 두 칸 모두 null이다.
-  사실·이미지는 기존 저장 값이며 작업 ID·입력 해시·원격 실패 코드·AI 원문은 응답과 감사에 싣지 않는다. 재생성과 상품 적용은 후속 단계다.
+  사실·이미지는 기존 저장 값이며 작업 ID·입력 해시·원격 실패 코드·AI 원문은 응답과 감사에 싣지 않는다. 상품 적용은 후속 단계다.
+- **재생성 (B3)** — `POST /{draftId}/regenerate` 는 검토 대기(`READY`)나 다시 만들 수 있는 실패(`FAILED`)의 다음 회차를 시작한다. 첫 생성을 포함해 3회차까지이고
+  실패한 회차도 센다(소진 409 `054`). 본문 `generationNo` 는 화면에 보이는 지금 회차다 — 지금 회차와 같으면 다음 회차를 시작하고, 이미 하나 더 올라가
+  생성 대기(시작함) · 생성 중이면 같은 요청의 재시도로 보고 그대로 200 이다(작업이 없으면 저장한 값으로 다시 등록해 operations 영수증을 재생한다).
+  그 밖의 회차 차이는 409 `025` 다. 새 초안이 필요한 실패(이미지 변경 · 입력 만료 · 결과 보관 만료 · 입력 거절 · 이미지 합계 초과)는 같은 입력으로 다시 만들어도
+  같아서 409 `055` 다. 생성 중 · 적용 · 거절은 `051`, 생성 플래그가 닫혀 있으면 400 `050` 이다. 새 회차는 상태를 `REQUESTED` 로 되돌리고 이전 회차의 제안 ·
+  실패 사유를 지운다 — 그래서 generation-input internal 의 상태 판정(생성 대기 · 생성 중만)은 바꾸지 않는다. 회차 · 시작한 어드민 · 시각은 새 회차 값이고
+  입력 hash 는 같은 입력이라 같다. 감사는 `PRODUCT_DRAFT_REGENERATE`(회차 · 작업은 싣지 않는다)다. 실패 안내(`failureNotice`)는 다시 만들 수 있으면 '다시 생성'을 권한다.
+- **매장 전체 동시 생성 3건 (B3, D13)** — 새 회차를 여는 claim(저장 뒤 자동 1회차 · `/generate` 의 1회차 · `/regenerate`)은 같은 짧은 쓰기 트랜잭션에서 단일 게이트 행
+  `product.product_draft_generation_gate`(id=1)을 쓰기 잠근 뒤(대기 2초, 넘으면 409 `025`) 자리를 센다. 자리는 회차를 시작한 생성 대기 · 생성 중 초안 중
+  보관 기간 안이고 회차를 시작한 지 `product-draft.generation-slot-ttl`(기본 30분)이 안 된 것이다 — 3건이면 409 `053` 이고 초안은 그대로다.
+  시작한 지 오래된 초안을 빼는 것은 결과 반영이 운영자 refresh 로만 일어나 방치된 초안이 보관 기간 내내 자리를 막지 않게 하려는 것이다. 실제 AI 동시 호출 상한은
+  operations 핸들러(동시 1)가 지키고 게이트는 몰려드는 요청을 막는다. 이미 시작한 회차의 재등록은 게이트를 지나지 않는다 — 그래서 시작한 지 자리 시간이 지나
+자리를 놓은 "시작함 · 작업 없음" 초안을 `/generate` 로 다시 등록하면 그 순간 진행 중 생성이 3건을 넘을 수 있다(알려진 한계, 실제 AI 호출은 operations 동시 1 로 막힌다). 저장 뒤 자동 시작이 `053` 이어도 저장은 201
+  `REQUESTED` 이고 `/generate` 로 다시 시도한다. 게이트 행이 없으면(아래 운영 DDL 의 insert 누락) 503 `502` 다.
+- **사이즈표** — 상품 초안은 사이즈표를 만들거나 적용하지 않는다. 사이즈표는 #217 사이즈표 AI 초안의 기존 적용 경로를 따로 쓴다.
 - **문구 검증(프롬프트 안전)**: 한 줄 칸은 유니코드 제어 문자(C0 · DEL · C1 — U+0085 포함) · 짝 없는 서로게이트 · 줄/문단 구분자(U+2028 · U+2029) ·
   방향 제어 문자(U+200E · U+200F · U+202A~202E · U+2066~2069) · 태그 문자(U+E0000~E007F)를 받지 않는다. 치수 메모는 여기에 `\n` · `\r` · 탭만 더 받는다.
   보이지 않는 지시 · 줄 나눔으로 프롬프트 데이터 칸 경계를 흉내 내지 못하게 하고, 검토 화면에 보이는 값과 저장 값이 같게 한다. 이모지용 ZWJ · 변형 선택자는 받는다.
@@ -1278,21 +1295,23 @@ weightGrams?, hsCode?, initialStock?{stockManaged, quantity}}]}` 를 받고 201 
 
   생성 대기 · 생성 중(`REQUESTED` · `GENERATING`)만 읽힌다 — 생성 대기도 받는 것은 등록 응답 유실로 상태가 아직 안 바뀌었을 수 있어서다. 스토리지 키 · ETag · 공개 주소 ·
   만든 어드민 · 카테고리 아이디는 싣지 않는다. 바이트는 고정한 ETag 조건 · 5MiB 상한으로 읽고 magic bytes 를 다시 판별해 크기 · 형식이 고정 값과 다르면 `044` 다.
-- **단계** — 초안 저장 · 조회 · 거절, 생성 입력 internal, operations 작업과 등록 API, product 등록 연결(B1)까지 있다. 후속:
-  결과 반영(B2 — 상품명 · 설명 · 검색 태그 · SEO · 대체 텍스트 · 확인이 필요한 속성) → 재생성 · 매장 전체 동시 3건 게이트(B3) →
-  이미지 첨부 준비(C1) → 적용(`POST /{draftId}/apply` — 상품 등록 #9 PR-E1 의 검증을 그대로 거치고, 같은 초안의 재시도는 상품을 하나만 만든다).
+- **단계** — 초안 저장 · 조회 · 거절, 생성 입력 internal, operations 작업과 등록 API, product 등록 연결(B1), 결과 반영(B2 — 상품명 · 설명 · 검색 태그 · SEO ·
+  대체 텍스트 · 확인이 필요한 속성), 재생성 · 매장 전체 동시 3건 게이트(B3)까지 있다. 후속: 이미지 첨부 준비(C1) → 적용(`POST /{draftId}/apply` — 상품 등록 #9 PR-E1 의
+  검증을 그대로 거치고, 같은 초안의 재시도는 상품을 하나만 만든다). 기존 상품 적용은 #797 이다.
 - 오류 코드: 업무 `PRODUCT_DRAFT_001`(없음 404) · `020`(적용한 초안 거절 409) · `022`(만료 409) · `025`(동시 변경 409) · `030`(이미지 주소 400) · `032`(저장소 미설정 503) ·
   `034`(대표 두 장 400) · `035`(같은 이미지 400) · `031`(업로드 확정 미디어 키 아님 400) · `033`(저장소에 없음 400) · `036`(크기 · 형식 400) · `037`(이미지 합계 초과 400) · `501`(이미지 저장소 장애 503).
-  생성 연결 `050`(기능 닫힘 400) · `051`(시작 불가 상태 409) · `052`(원본 미고정 409) · `502`(등록 불가 503) · `504`(등록 응답 계약 위반 502).
+  생성 연결 `050`(기능 닫힘 400) · `051`(시작 불가 상태 409) · `052`(원본 미고정 409) · `053`(매장 동시 생성 3건 409) · `054`(재생성 횟수 소진 409) ·
+  `055`(새 초안 필요 — 재생성 불가 실패 409) · `502`(등록 불가 · 게이트 행 없음 503) · `504`(등록 응답 계약 위반 502).
   internal 전용 `040`(생성 기능 닫힘 400) · `041`(거절 409) · `042`(생성할 수 없는 상태 409) · `043`(원본 미고정 409) · `044`(이미지 바뀜 410) · `045`(이미지 순번 없음 404).
-  필드 검증 `PRODUCT_DRAFT_101~126`, 경로 draftId 양수 `127`(`ProductDraftValidationMessage`).
+  필드 검증 `PRODUCT_DRAFT_101~126`, 경로 draftId 양수 `127`, 재생성 본문 `generationNo` 필수 `128` · 1~3 `129`(`ProductDraftValidationMessage`).
   `PRODUCT_1xx` 검증 대역이 차서 컨텍스트 접두어 `PRODUCT_DRAFT_` 를 새로 열었다(§2-11 · §2-12 와 같다). 깨진 JSON · 타입 불일치(`imageType` 오타 포함)는 서비스 공용 `PRODUCT_100` · `198` 이다.
 - **게이트웨이**: 새 접두어 `/api/v1/admin/product-drafts/**` 는 §1-2 와 `ServiceRoute.PRODUCT` 에 함께 있다.
 
 #### #359 B1 운영 DDL
 
 `ProductSchemaSnapshotTest` 의 PostgreSQL 17 생성본에서 `product_draft` 증분과 단일 게이트 테이블을 옮겼다. 운영자가 DDL 적용 계정으로 먼저 적용하고
-product 배포 뒤에도 생성 플래그는 B3 전까지 닫아 둔다. 기존 초안은 `generation_no=0` 이다. 게이트 행은 B3 잠금 구현 전에 한 번 만든다.
+product 배포 뒤에도 생성 플래그는 상품 적용(C2) 전까지 닫아 둔다. 기존 초안은 `generation_no=0` 이다. 게이트 행(아래 `insert`)은 B3 배포 전에 반드시 있어야 한다 —
+B3 는 새 DDL 이 없고 이 행을 잠가 동시 생성을 센다. 없으면 생성 시작 · 재생성이 503 `502` 다(`select count(*) from product.product_draft_generation_gate` = 1 확인).
 
 ```sql
 set client_encoding = 'UTF8';
