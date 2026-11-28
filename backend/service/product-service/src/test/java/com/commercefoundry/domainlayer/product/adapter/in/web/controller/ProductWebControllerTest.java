@@ -23,6 +23,7 @@ import com.commercefoundry.domainlayer.product.application.model.ProductSortType
 import com.commercefoundry.domainlayer.product.application.port.in.ProductWebUseCase;
 import com.commercefoundry.domainlayer.category.application.service.processor.CategoryProcessor;
 import com.commercefoundry.domainlayer.product.adapter.in.web.presenter.ProductWebPresenter;
+import com.commercefoundry.domainlayer.product.application.port.out.PriceSourceSnapshotRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort;
@@ -38,6 +39,7 @@ import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
+import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.shared.commerce.CurrencyCode;
 import com.commercefoundry.shared.commerce.Money;
@@ -108,7 +110,8 @@ class ProductWebControllerTest {
             ProductFixtures.sku(12, 1, "", 0, SaleStatus.STOP_SELLING)));
         given(stocks.findAllBySkuIds(anyCollection())).willReturn(List.of(new Stock(10, true, 5), new Stock(11, true, 0), new Stock(12, true, 5)));
         var facade = new ProductWebFacade(mock(CategoryProcessor.class), new ProductListProcessor(products, skus, images, store),
-            new ProductDetailProcessor(products, options, skus, stocks, images, fields, store), new ProductWebPresenter());
+            new ProductDetailProcessor(products, options, skus, stocks, images, fields, store,
+                mock(PriceSourceSnapshotRepositoryPort.class), new PriceSourceProperties(null)), new ProductWebPresenter());
         // Reuse this MVC slice: only the mocked entry port delegates; the entire customer read/formatting path is real.
         given(productWebUseCase.searchProducts(null, ProductSortType.NEWEST, 0, 20))
             .willAnswer(invocation -> facade.searchProducts(null, ProductSortType.NEWEST, 0, 20));

@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** B1의 읽기 스냅숏을 상품별로 검증하고 투영한다. 생산 조회 경로에는 아직 연결하지 않는다. */
+/** B1의 읽기 스냅숏을 상품별로 검증하고 투영한다. 생산 조회 경로 연결은 PRICE_BOOK 모드의 고객 상품 상세(B4)뿐이다. */
 public final class PriceSourceSnapshotResolver {
     private PriceSourceSnapshotResolver() {
     }

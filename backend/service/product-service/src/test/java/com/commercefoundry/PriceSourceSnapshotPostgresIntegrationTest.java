@@ -12,20 +12,18 @@ import ch.qos.logback.classic.spi.ThrowableProxyUtil;
 import ch.qos.logback.core.read.ListAppender;
 import com.commercefoundry.domainlayer.product.adapter.out.persistence.entity.ProductEntity;
 import com.commercefoundry.domainlayer.product.application.port.out.query.PriceSourceSnapshotQueryResult;
+import com.commercefoundry.domainlayer.product.application.service.processor.PriceSourceSnapshotResolver;
 import com.commercefoundry.shared.commerce.Money;
 import com.commercefoundry.support.EnabledWithDockerOrOnCi;
-import jakarta.persistence.EntityManager;
 import java.sql.Connection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -39,8 +37,38 @@ class PriceSourceSnapshotPostgresIntegrationTest extends PriceSourceSnapshotInte
     @ServiceConnection
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine").withInitScript("ddl/product-schema.sql");
 
-    @Autowired PlatformTransactionManager manager;
-    @Autowired EntityManager em;
+    /**
+     * 상세 경로(D3) — 호출자가 상품·SKU 를 먼저 읽은 뒤 다른 TX 가 legacy 컬럼과 가격행을 같이 바꿔 커밋해도, 같은 TX 의 참여 snapshot 은 처음 시점 값을 돌려주고
+     * resolve 는 가짜 drift 없이 성공한다. PostgreSQL 에만 둔다 — H2 2.x 의 REPEATABLE_READ 는 표마다 처음 접근할 때 snapshot 을 잡아,
+     * 첫 읽기 뒤 처음 닿는 가격행 표에는 다른 TX 커밋이 보여 LEGACY_DRIFT 가 난다(운영 DB 인 PostgreSQL 은 TX 의 첫 문장에서 한 snapshot).
+     */
+    @Test
+    void currentTransactionReadKeepsTheCallerSnapshotDespiteConcurrentCommit() {
+        seedPricedProduct();
+        callerTemplate().executeWithoutResult(status -> {
+            assertThat(jdbc.queryForObject("show transaction_isolation", String.class)).isEqualTo("repeatable read");
+            assertThat(jdbc.queryForObject("show transaction_read_only", String.class)).isEqualTo("on");
+            assertThat(em.find(ProductEntity.class, 1L).getVersion()).isZero();
+            assertThat(jdbc.queryForObject("select additional_price_amount from product.sku where id=10", Long.class)).isZero();
+            CompletableFuture.runAsync(() -> new TransactionTemplate(manager).executeWithoutResult(writer -> {
+                jdbc.update("update product.product set sale_price_amount=1007, version=version+1 where id=1");
+                jdbc.update("update product.sku set additional_price_amount=7 where id=10");
+                jdbc.update("update product.product_price set sale_price_amount=1007 where id=100");
+                jdbc.update("update product.sku_price set additional_price_amount=7 where id=200");
+            })).orTimeout(3, TimeUnit.SECONDS).join();
+            measure();
+            var projection = PriceSourceSnapshotResolver.resolve(port.readByProductIdsInCurrentTransaction(List.of(1L))).getFirst();
+            assertSelects(4);
+            assertThat(projection.product().version()).isZero();
+            assertThat(projection.product().salePrice()).isEqualTo(Money.of(1_000, KRW));
+            assertThat(projection.skus()).singleElement().satisfies(sku -> assertThat(sku.additionalPrice()).isEqualTo(Money.zero(KRW)));
+        });
+        callerTemplate().executeWithoutResult(status -> {
+            var projection = PriceSourceSnapshotResolver.resolve(port.readByProductIdsInCurrentTransaction(List.of(1L))).getFirst();
+            assertThat(projection.product().salePrice()).isEqualTo(Money.of(1_007, KRW));
+            assertThat(projection.skus().getFirst().additionalPrice()).isEqualTo(Money.of(7, KRW));
+        });
+    }
 
     @Test
     void writerCommitsBetweenQueriesButAllFourSourcesUseTheFirstSnapshot() {

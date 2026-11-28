@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.product.application.service.processor;
 
 import com.commercefoundry.domainlayer.category.domain.model.Category;
+import com.commercefoundry.domainlayer.product.application.exception.PriceSourceSnapshotReadException;
 import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.info.CategoryPathInfo;
@@ -13,12 +14,14 @@ import com.commercefoundry.domainlayer.product.application.info.ProductOptionGro
 import com.commercefoundry.domainlayer.product.application.info.ProductOptionValueInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductSkuInfo;
 import com.commercefoundry.domainlayer.product.application.model.ProductSaleSummary;
+import com.commercefoundry.domainlayer.product.application.port.out.PriceSourceSnapshotRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.domain.model.BaseCurrencyPriceProjection;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderField;
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.OptionGroup;
@@ -30,7 +33,9 @@ import com.commercefoundry.domainlayer.product.domain.model.ProductText;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.Sku;
 import com.commercefoundry.domainlayer.product.domain.model.SkuStocks;
+import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.global.properties.StoreProperties;
+import com.commercefoundry.shared.commerce.Money;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -50,11 +55,18 @@ import org.springframework.stereotype.Component;
  *
  * <p>은퇴한 옵션 그룹 · 값과 은퇴 값을 하나라도 쓰는 SKU 는 고객에게 내지 않는다 — 은퇴 그룹의 값은 값 자신이 은퇴하지 않았어도 은퇴로 본다.
  * 판매 가격 · 상태 요약도 남은 SKU 로만 계산한다. 은퇴 행을 거르는 곳은 여기뿐이다 — 서비스 간 SKU 조회는 주문 · 장바구니 줄의 옵션명을 위해 은퇴 값도 읽는다.
+ *
+ * <p>{@code price-source.mode=PRICE_BOOK} 이면 SKU 다음에 가격 원천 snapshot 을 호출자 TX 안에서 한 번 더 읽는다 — 상품 아이디 하나로 상품 → 전체 SKU →
+ * 상품 가격행 → SKU 가격행 최대 4 SELECT(SKU 가 없으면 3), 각각 in 절 한 번이라 N+1 이 없다. Facade 의 REPEATABLE_READ read-only TX 라 앞의 읽기와 한 시점이다.
+ * LEGACY(기본)는 snapshot 포트를 부르지 않는다 — 쿼리 · 응답이 전과 같다.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class ProductDetailProcessor {
+
+    private static final String PRICE_SOURCE_SKU_MISMATCH = "SKU_NOT_IN_PROJECTION";
+    private static final String PRICE_SOURCE_FAILURE_MESSAGE = "상품 상세 가격 원천을 사용할 수 없습니다";
 
     private final ProductRepositoryPort productRepositoryPort;
     private final ProductOptionRepositoryPort productOptionRepositoryPort;
@@ -63,6 +75,8 @@ public class ProductDetailProcessor {
     private final ProductImageRepositoryPort productImageRepositoryPort;
     private final ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
     private final StoreProperties storeProperties;
+    private final PriceSourceSnapshotRepositoryPort priceSourceSnapshotRepositoryPort;
+    private final PriceSourceProperties priceSourceProperties;
 
     /**
      * 고객에게 보이는 상품. 판매 종료 상품도 돌려준다 — 화면은 "판매 종료" 로 보인다.
@@ -87,9 +101,19 @@ public class ProductDetailProcessor {
         Set<Long> retiredValueIds = retiredValueIds(allGroups, allValues);
         List<OptionGroup> groups = allGroups.stream().filter(group -> !group.isRetired()).toList();
         List<OptionValue> values = allValues.stream().filter(value -> !retiredValueIds.contains(value.id())).toList();
-        List<Sku> skus = skuRepositoryPort.findAllByProductId(product.id()).stream()
+        List<Sku> visibleSkus = skuRepositoryPort.findAllByProductId(product.id()).stream()
             .filter(sku -> sku.optionKey().valueIds().stream().noneMatch(retiredValueIds::contains))
             .toList();
+        PricedSource priced = priceSourceProperties.mode() == PriceSourceProperties.Mode.PRICE_BOOK
+            ? priceBookSource(product, visibleSkus)
+            : new PricedSource(product, visibleSkus);
+        return assemble(priced.product(), categoryPath, locale, groups, values, priced.skus());
+    }
+
+    /** 가격이 정해진 상품 · SKU 로 응답 정보를 조립한다. 재고 · 이미지 · (맞춤 제작이면) 입력 항목은 여기서 읽는다. */
+    private ProductDetailInfo assemble(
+        Product product, List<Category> categoryPath, Locale locale, List<OptionGroup> groups, List<OptionValue> values, List<Sku> skus
+    ) {
         SkuStocks stocks = SkuStocks.of(stockRepositoryPort.findAllBySkuIds(skus.stream().map(Sku::id).toList()));
         List<ProductImage> images = productImageRepositoryPort.findAllByProductId(product.id());
 
@@ -115,6 +139,45 @@ public class ProductDetailProcessor {
             .customOrder(customOrderOf(product))
             .preorder(preorderOf(product))
             .build();
+    }
+
+    /**
+     * PRICE_BOOK 모드 — 호출자(Facade) TX에 참여해 같은 시점의 가격 원천을 읽고, 투영의 기준통화 판매가 · 정가와 SKU 추가금을 응답 계산에 쓴다.
+     * 상품의 비가격 필드와 SKU 의 상태 · 옵션 · 배송 필드는 이미 읽은 값을 그대로 둔다. 가격행 누락 · drift · snapshot 실패와,
+     * 상세가 읽은 SKU 가 투영에 없는 경우는 모두 고정 내부 오류다 — 원인 · 원문 · ID · 금액 없이 전역 처리기의 500 {@code COMMON_000} 으로 끝난다(#20 D7).
+     */
+    private PricedSource priceBookSource(Product product, List<Sku> visibleSkus) {
+        BaseCurrencyPriceProjection projection;
+        try {
+            projection = PriceSourceSnapshotResolver.resolve(
+                priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(product.id()))).getFirst();
+        } catch (PriceSourceSnapshotReadException exception) {
+            throw priceSourceFailure(exception.reason().name());
+        } catch (PriceSourceSnapshotResolver.ResolutionException exception) {
+            throw priceSourceFailure(exception.reason().name());
+        }
+        Map<Long, Money> additionalBySkuId = new HashMap<>();
+        projection.skus().forEach(sku -> additionalBySkuId.put(sku.id(), sku.additionalPrice()));
+        List<Sku> pricedSkus = new ArrayList<>(visibleSkus.size());
+        for (Sku sku : visibleSkus) {
+            Money additional = additionalBySkuId.get(sku.id());
+            if (additional == null) {
+                throw priceSourceFailure(PRICE_SOURCE_SKU_MISMATCH);
+            }
+            pricedSkus.add(sku.withEditableProperties(additional, sku.saleStatus(), sku.weightGrams(), sku.hsCode()));
+        }
+        Product priced = product.withPricing(projection.product().salePrice(), projection.product().listPrice());
+        return new PricedSource(priced, List.copyOf(pricedSkus));
+    }
+
+    /** 운영자용 정제 로그는 사유 이름 한 줄뿐이다. 예외에는 메시지 고정 · cause 없음 — 전역 처리기 로그(타입 · 스택)에도 원문이 실리지 않는다. */
+    private static IllegalStateException priceSourceFailure(String reason) {
+        log.warn("price source unavailable for product detail. reason={}", reason);
+        return new IllegalStateException(PRICE_SOURCE_FAILURE_MESSAGE);
+    }
+
+    /** 응답 계산에 쓸 가격이 반영된 상품 · SKU. LEGACY 는 읽은 값 그대로다. */
+    private record PricedSource(Product product, List<Sku> skus) {
     }
 
     /**

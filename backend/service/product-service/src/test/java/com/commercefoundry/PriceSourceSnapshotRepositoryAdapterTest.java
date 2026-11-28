@@ -1,5 +1,6 @@
 package com.commercefoundry;
 
+import static com.commercefoundry.domainlayer.product.application.exception.PriceSourceSnapshotReadException.Reason.CALLER_TRANSACTION_REQUIRED;
 import static com.commercefoundry.domainlayer.product.application.exception.PriceSourceSnapshotReadException.Reason.INVALID_INPUT;
 import static com.commercefoundry.domainlayer.product.application.exception.PriceSourceSnapshotReadException.Reason.PRODUCT_MISSING;
 import static com.commercefoundry.domainlayer.product.application.exception.PriceSourceSnapshotReadException.Reason.READ_FAILED;
@@ -39,6 +40,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 class PriceSourceSnapshotRepositoryAdapterTest {
     private final ProductRepository products = mock(ProductRepository.class);
@@ -134,6 +136,54 @@ class PriceSourceSnapshotRepositoryAdapterTest {
         doThrow(new IllegalStateException("raw-commit")).when(manager).commit(status);
         assertFailure(catchThrowable(() -> committing.readByProductIds(List.of(1L))), READ_FAILED);
         verify(manager).commit(status);
+    }
+
+    @Test
+    void currentTransactionReadRejectsMissingOrWeakCallerBeforeTransactionAndSql() {
+        assertThat(adapter.readByProductIdsInCurrentTransaction(List.of()).productIds()).isEmpty();
+        assertFailure(catchThrowable(() -> adapter.readByProductIdsInCurrentTransaction(List.of(0L))), INVALID_INPUT);
+        assertFailure(catchThrowable(() -> adapter.readByProductIdsInCurrentTransaction(List.of(1L))), CALLER_TRANSACTION_REQUIRED);
+        // 열린 TX 라도 read-only 가 아니거나 REPEATABLE_READ 미만이면 호출자의 첫 읽기와 같은 시점을 보장할 수 없다.
+        assertCallerRejected(false, TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        assertCallerRejected(true, TransactionDefinition.ISOLATION_READ_COMMITTED);
+        assertCallerRejected(true, null);
+        verifyNoInteractions(manager, products, skus, productPrices, skuPrices);
+    }
+
+    @Test
+    void currentTransactionReadJoinsTheCallerWithMandatoryPropagationAndSharesSanitizing() {
+        var ids = LongStream.rangeClosed(1, 50).boxed().toList();
+        var duplicated = new java.util.ArrayList<>(ids.reversed());
+        duplicated.addAll(ids);
+        inCaller(true, TransactionDefinition.ISOLATION_REPEATABLE_READ, () ->
+            assertFailure(catchThrowable(() -> adapter.readByProductIdsInCurrentTransaction(duplicated)), PRODUCT_MISSING));
+        verify(products).findAllByIdInOrderByIdAsc(ids, PageRequest.of(0, 51));
+        verifyNoInteractions(skus, productPrices, skuPrices);
+        var config = ArgumentCaptor.forClass(TransactionDefinition.class);
+        verify(manager).getTransaction(config.capture());
+        assertThat(config.getValue().getPropagationBehavior()).isEqualTo(TransactionDefinition.PROPAGATION_MANDATORY);
+        verify(manager).rollback(status);
+
+        when(products.findAllByIdInOrderByIdAsc(any(), any())).thenThrow(new IllegalStateException("raw-repository"));
+        inCaller(true, TransactionDefinition.ISOLATION_SERIALIZABLE, () ->
+            assertFailure(catchThrowable(() -> adapter.readByProductIdsInCurrentTransaction(List.of(1L))), READ_FAILED));
+    }
+
+    private void assertCallerRejected(boolean readOnly, Integer isolation) {
+        inCaller(readOnly, isolation, () ->
+            assertFailure(catchThrowable(() -> adapter.readByProductIdsInCurrentTransaction(List.of(1L))), CALLER_TRANSACTION_REQUIRED));
+    }
+
+    /** 실제 TX 없이 호출자 TX 의 동기화 상태만 흉내 낸다 — 어댑터가 보는 것은 이 상태와 TransactionTemplate 의 전파뿐이다. */
+    private static void inCaller(boolean readOnly, Integer isolation, Runnable body) {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(readOnly);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(isolation);
+        try {
+            body.run();
+        } finally {
+            TransactionSynchronizationManager.clear();
+        }
     }
 
     static void assertFailure(Throwable error, Reason reason) {
