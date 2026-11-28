@@ -13,6 +13,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -102,7 +103,8 @@ class LowStockAlertPersistencePostgresTest extends LowStockAlertPersistenceContr
             }
             await(empty);
             insert.countDown();
-            var failures = List.of(tasks.get(0).get(20, TimeUnit.SECONDS), tasks.get(1).get(20, TimeUnit.SECONDS)).stream()
+            // 이긴 쪽은 null 을 돌려준다 — List.of 는 null 요소를 거부하므로 Stream.of 로 모은다.
+            var failures = Stream.of(tasks.get(0).get(20, TimeUnit.SECONDS), tasks.get(1).get(20, TimeUnit.SECONDS))
                 .filter(Objects::nonNull).toList();
             assertThat(failures).hasSize(1);
             assertThat(sqlState(failures.getFirst())).isEqualTo("23505");
