@@ -1,6 +1,7 @@
 package com.commercefoundry.domainlayer.product.application.port.out;
 
 import com.commercefoundry.domainlayer.product.application.port.out.query.ProductImageUploadTicket;
+import com.commercefoundry.domainlayer.product.domain.model.ProductImageManagedSource;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImageUploadKey;
 
 /**
@@ -16,6 +17,12 @@ public interface ProductImageStoragePort {
      */
     /** 검증한 원본을 ETag 조건으로 복사하고 서버의 공개 URL 을 돌려준다. */
     String attach(ProductImageUploadKey key, String targetKey);
+
+    /**
+     * 고정한 상품 미디어 원본(#359 C1)을 고정한 ETag 조건으로 복사하고 서버의 공개 URL 을 돌려준다. 원본이 없거나 ETag · 크기 · 형식이 고정 값과 다르면
+     * {@code PRODUCT_032}(400)다 — 그 사이 바뀐 원본은 붙이지 않는다. 호출한 쪽(초안 적용)이 운영자 문구로 바꾼다.
+     */
+    String attachManaged(ProductImageManagedSource source, String targetKey);
 
     /** 실패 보상. 이 작업이 새로 만든 목적지만 삭제한다. */
     void delete(String targetKey);

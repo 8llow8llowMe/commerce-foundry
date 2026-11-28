@@ -4,8 +4,11 @@ import com.commercefoundry.domainlayer.product.application.exception.ProductErro
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductImageStoragePort;
 import com.commercefoundry.domainlayer.product.application.port.out.query.ProductImageUploadTicket;
+import com.commercefoundry.domainlayer.product.domain.model.ProductImageFormat;
+import com.commercefoundry.domainlayer.product.domain.model.ProductImageManagedSource;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImageUploadKey;
 import com.commercefoundry.storage.client.ObjectStorageClient;
+import com.commercefoundry.storage.image.ImageFormat;
 import com.commercefoundry.storage.client.PresignedUpload;
 import com.commercefoundry.storage.client.StorageException;
 import lombok.RequiredArgsConstructor;
@@ -56,6 +59,32 @@ public class ProductImageStorageAdapter implements ProductImageStoragePort {
                 throw new ProductException(ProductErrorCode.IMAGE_FORMAT_NOT_ALLOWED);
             }
             objectStorageClient.copy(key.value(), targetKey, format.contentType(), "public, max-age=31536000, immutable", source.eTag());
+            return url;
+        } catch (StorageException exception) {
+            throw translate(exception);
+        }
+    }
+
+    @Override
+    public String attachManaged(ProductImageManagedSource source, String targetKey) {
+        try {
+            String url = objectStorageClient.publicUrlOf(targetKey);
+            if (url.length() > 500) {
+                throw new ProductException(ProductErrorCode.IMAGE_STORAGE_UNAVAILABLE);
+            }
+            var stored = objectStorageClient.head(source.key())
+                .orElseThrow(() -> new ProductException(ProductErrorCode.IMAGE_UPLOAD_NOT_FOUND));
+            // 고정한 원본과 같은 객체만 붙인다 — 다르면 그 사이 바뀐 것이라 "없음"으로 답한다.
+            if (!source.eTag().equals(stored.eTag()) || stored.contentLength() != source.length()
+                || ProductImageFormat.ofContentType(stored.contentType()).filter(source.format()::equals).isEmpty()) {
+                throw new ProductException(ProductErrorCode.IMAGE_UPLOAD_NOT_FOUND);
+            }
+            var format = ImageFormat.detect(objectStorageClient.readRange(source.key(), ImageFormat.DETECTION_LENGTH, source.eTag()))
+                .orElseThrow(() -> new ProductException(ProductErrorCode.IMAGE_UPLOAD_NOT_FOUND));
+            if (!format.contentType().equals(source.format().getContentType())) {
+                throw new ProductException(ProductErrorCode.IMAGE_UPLOAD_NOT_FOUND);
+            }
+            objectStorageClient.copy(source.key(), targetKey, format.contentType(), "public, max-age=31536000, immutable", source.eTag());
             return url;
         } catch (StorageException exception) {
             throw translate(exception);

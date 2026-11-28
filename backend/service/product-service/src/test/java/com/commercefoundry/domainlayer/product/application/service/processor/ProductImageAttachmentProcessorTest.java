@@ -10,6 +10,7 @@ import com.commercefoundry.domainlayer.product.application.port.out.ProductImage
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImageUploadKey;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImageFormat;
+import com.commercefoundry.domainlayer.product.domain.model.ProductImageManagedSource;
 import com.commercefoundry.persistence.util.SnowflakeIdGenerator;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -65,5 +66,55 @@ class ProductImageAttachmentProcessorTest {
         var images = processor.attach(7, command(99, new ProductCreateCommand.Image(key.value(), ImageType.GALLERY, null)));
         assertThat(images.getFirst().storageKey()).isEqualTo("products/7/8.png");
         assertThat(images.getFirst().displayOrder()).isEqualTo(1);
+    }
+
+    private static final String MEDIA = "products/media/7/0f8fad5b-d9cb-469f-a165-70867728950e/";
+
+    private static ProductImageManagedSource managed(char hash, ProductImageFormat format) {
+        return new ProductImageManagedSource(MEDIA + String.valueOf(hash).repeat(64) + "." + format.getExtension(), "\"etag\"", 12, format);
+    }
+
+    @Test
+    void managedSourceSkipsOwnershipAndCopiesWithItsFormat() {
+        when(ids.generateId()).thenReturn(8L, 9L);
+        var thumbnail = managed('a', ProductImageFormat.WEBP);
+        var gallery = managed('b', ProductImageFormat.JPEG);
+        when(storage.attachManaged(thumbnail, "products/7/8.webp")).thenReturn("https://media.example.com/products/7/8.webp");
+        when(storage.attachManaged(gallery, "products/7/9.jpg")).thenReturn("https://media.example.com/products/7/9.jpg");
+
+        // 초안을 만든 어드민과 적용하는 어드민이 달라도 붙는다 — 관리 원본은 키 소유를 보지 않는다.
+        var images = processor.attach(7, command(55,
+            ProductCreateCommand.Image.managed(thumbnail, ImageType.THUMBNAIL, "대표"),
+            ProductCreateCommand.Image.managed(gallery, ImageType.GALLERY, null)));
+
+        assertThat(images).extracting(i -> i.storageKey()).containsExactly("products/7/8.webp", "products/7/9.jpg");
+        assertThat(images).extracting(i -> i.displayOrder()).containsExactly(0, 2);
+        verify(storage, never()).attach(any(), any());
+    }
+
+    @Test
+    void managedSourceRejectsDuplicatesBeforeStorageAndCompensatesOnFailure() {
+        var source = managed('a', ProductImageFormat.PNG);
+        assertThatThrownBy(() -> processor.attach(7, command(55,
+            ProductCreateCommand.Image.managed(source, ImageType.GALLERY, null), ProductCreateCommand.Image.managed(source, ImageType.GALLERY, null))))
+            .isInstanceOf(ProductException.class);
+        verifyNoInteractions(storage);
+
+        when(ids.generateId()).thenReturn(8L, 9L);
+        var second = managed('b', ProductImageFormat.PNG);
+        when(storage.attachManaged(source, "products/7/8.png")).thenReturn("https://media.example.com/products/7/8.png");
+        var changed = new ProductException(com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode.IMAGE_UPLOAD_NOT_FOUND);
+        when(storage.attachManaged(second, "products/7/9.png")).thenThrow(changed);
+        assertThatThrownBy(() -> processor.attach(7, command(55,
+            ProductCreateCommand.Image.managed(source, ImageType.GALLERY, null), ProductCreateCommand.Image.managed(second, ImageType.GALLERY, null))))
+            .isSameAs(changed);
+        verify(storage).delete("products/7/8.png");
+        verify(storage).delete("products/7/9.png");
+    }
+
+    @Test
+    void imageCannotCarryBothSources() {
+        assertThatThrownBy(() -> new ProductCreateCommand.Image(key.value(), managed('a', ProductImageFormat.PNG), ImageType.GALLERY, null))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 }
