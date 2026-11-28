@@ -208,7 +208,7 @@ Infra 의 Kafka 는 3노드 KRaft 클러스터(apache/kafka 4.3 · RF 3 · min I
 | 이름 | **namespace `commerce-foundry.<env>`**(local · dev · prod). 토픽 `<ns>.<생산 서비스>.<aggregate>-<event>`(예: `commerce-foundry.dev.order.order-expired`), DLT `<토픽>.dlt`, 컨슈머 그룹 `<ns>.<소비 서비스>.<목적>`(예: `commerce-foundry.dev.product.order-stock-release`). 다른 고객사가 같은 클러스터를 쓰면 namespace 만 바꾼다 — 코드에 스토어 이름을 넣지 않는다 | prefix 를 `commerce-foundry` 로 둘지 `cf` 로 줄일지(#304 Q7 — 권장 `commerce-foundry`) |
 | 토픽 생성 | **앱은 만들지 않는다**(브로커 자동 생성 끔 · `spring.kafka.admin.auto-create=false` · `NewTopic` 빈 금지 — #306). 목록의 정본은 `backend/docker/kafka/topics.txt`(`<생산 서비스>.<aggregate>-<event> <보존 ms>`). 로컬은 `create-topics.sh` 가 만들고, dev · prod 는 `create-topics.sh dev` · `prod` 가 출력한 목록을 Infra 레포의 선언 스크립트가 `--if-not-exists` 로 만든다. 파티션 local 3 · dev 3 · prod 6, 복제 local 1 · dev · prod 3, DLT 는 같이 만든다 | prod 파티션 6 · 보존 168h 확정, dev · prod 가 한 클러스터를 namespace 로만 나눠 써도 되는지(#304 Q6) |
 | 토픽 추가 절차 | **이벤트를 정의하는 PR(#307 · #308 · #309 …)이 `topics.txt` 에 그 토픽을 더하고**, PR 본문에 `create-topics.sh dev` · `prod` 출력을 붙여 Infra 반영을 요청한다. 앱은 기동 때 토픽이 있는지 보고 없으면 뜨지 않는다(#306) — Infra 반영이 배포보다 먼저다 | — |
-| 결제 → 주문 반영 켜는 순서 (#308) | 거꾸로 켜면 기동이 실패하거나(토픽 · 테이블 부재) 이벤트가 쌓인다. ① 운영 DDL — 각 PR 본문의 테이블(order 의 `order_payment` · `processed_event` · 확정 증거 테이블, payment 의 `outbox` · `processed_event`) ② 토픽 — `payment.payment-approved` · `order.order-paid` · `order.order-payment-rejected`(+ `.dlt`)를 Infra 에 반영 ③ `MESSAGING_ENABLED=true`(order · payment) — **④ · ⑤ 소비 게이트를 켜기 전에 #582(결제 반영 재고 복원 · 거절 회신 스윕)가 머지 · 배포돼 있어야 한다.** 스윕 없이 켜면 DLT · 복원 대기 행이 사람 손으로만 풀린다(`order-flow-guide.md` §3-6 점검 쿼리) ④ order 컨슈머 `ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED=true` — 기동 때 위 토픽을 확인한다 ⑤ payment 회신 컨슈머 `payment.order-result.consumer.enabled=true`(#308 PR-C3c 구현 · 기본 OFF — 메시징과 이 게이트가 모두 켜져야 리스너와 두 회신 토픽 · DLT 확인이 등록된다) ⑥ 운영 결제 게이트 `payment.enabled`(#15 복구 경로까지 갖춘 뒤, `payment-guide.md` §3-4) ⑦ 결제 후 취소 재시도 `order.cancellation.retry.enabled=true`(환경 변수 `ORDER_CANCELLATION_RETRY_ENABLED`, #16 PR-2 — ⑥ 과 같은 배포 또는 그 전에 켠다. 꺼져 있으면 결제 후 고객 취소가 503 `ORDER_035` 로 닫힌다, `order-flow-guide.md` §1-1 · §5) ⑧ **결제 후 취소 종결 실패 수습 경로 확인 — #17 어드민 처리 또는 #477 알림 연결 전에는 운영 결제를 열지 않는다.** 그 전까지 운영자는 어드민 클레임 목록(`GET /api/v1/admin/claims?type=CANCELLATION&status=`)에서 `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인하고, 실패 코드(`failure_code` — 지금 어드민 응답에는 없어 error 로그 `cancellation claim failed` 또는 DB 로 본다)가 `*_UNCONFIRMED` 면 PG 거래 · 재고의 실제 상태를 먼저 확인한다. **#17 A3 의 수동 환불 확정(`POST /api/v1/admin/claims/{claimId}/refund-confirmation`)은 운영에서 쓰기 전에 #693(결제 쪽 장부 정합)이 먼저다** — 그 전에는 확정 건이 결제 쪽에 `REJECTED` · `PENDING` 으로 남는다(`payment-guide.md` §8). 끌 때는 거꾸로 — 결제 게이트부터 닫는다 | — |
+| 결제 → 주문 반영 켜는 순서 (#308) | 거꾸로 켜면 기동이 실패하거나(토픽 · 테이블 부재) 이벤트가 쌓인다. ① 운영 DDL — 각 PR 본문의 테이블(order 의 `order_payment` · `processed_event` · 확정 증거 테이블, payment 의 `outbox` · `processed_event`) ② 토픽 — `payment.payment-approved` · `order.order-paid` · `order.order-payment-rejected`(+ `.dlt`)를 Infra 에 반영 ③ `MESSAGING_ENABLED=true`(order · payment) — **④ · ⑤ 소비 게이트를 켜기 전에 #582(결제 반영 재고 복원 · 거절 회신 스윕)를 배포하고 스윕 `ORDER_PAYMENT_RESTORATION_SWEEP_ENABLED=true` 를 켠다 — 순서는 아래 "결제 반영 복원 작업원장 배포 (#582 A)" 의 켜는 순서 체크리스트.** 스윕 없이 켜면 DLT · 복원 대기 행이 사람 손으로만 풀리고, 결제 전 취소 거절이 product 장애에 묶인다(`order-flow-guide.md` §3-6) ④ order 컨슈머 `ORDER_PAYMENT_APPROVAL_CONSUMER_ENABLED=true` — 기동 때 위 토픽을 확인한다 ⑤ payment 회신 컨슈머 `payment.order-result.consumer.enabled=true`(#308 PR-C3c 구현 · 기본 OFF — 메시징과 이 게이트가 모두 켜져야 리스너와 두 회신 토픽 · DLT 확인이 등록된다) ⑥ 운영 결제 게이트 `payment.enabled`(#15 복구 경로까지 갖춘 뒤, `payment-guide.md` §3-4) ⑦ 결제 후 취소 재시도 `order.cancellation.retry.enabled=true`(환경 변수 `ORDER_CANCELLATION_RETRY_ENABLED`, #16 PR-2 — ⑥ 과 같은 배포 또는 그 전에 켠다. 꺼져 있으면 결제 후 고객 취소가 503 `ORDER_035` 로 닫힌다, `order-flow-guide.md` §1-1 · §5) ⑧ **결제 후 취소 종결 실패 수습 경로 확인 — #17 어드민 처리 또는 #477 알림 연결 전에는 운영 결제를 열지 않는다.** 그 전까지 운영자는 어드민 클레임 목록(`GET /api/v1/admin/claims?type=CANCELLATION&status=`)에서 `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인하고, 실패 코드(`failure_code` — 지금 어드민 응답에는 없어 error 로그 `cancellation claim failed` 또는 DB 로 본다)가 `*_UNCONFIRMED` 면 PG 거래 · 재고의 실제 상태를 먼저 확인한다. **#17 A3 의 수동 환불 확정(`POST /api/v1/admin/claims/{claimId}/refund-confirmation`)은 운영에서 쓰기 전에 #693(결제 쪽 장부 정합)이 먼저다** — 그 전에는 확정 건이 결제 쪽에 `REJECTED` · `PENDING` 으로 남는다(`payment-guide.md` §8). 끌 때는 거꾸로 — 결제 게이트부터 닫는다 | — |
 | 접속 주소 | 키 이름 `KAFKA_BOOTSTRAP_SERVERS`, 값은 Vault | **결정 대기** — backend 컨테이너가 공유 클러스터에 닿는 방식(EXTERNAL 리스너 [권장] vs Infra 공유 네트워크 합류, #304 Q1) |
 | 보안 | 로컬 · 지금은 `PLAINTEXT`, SASL 키는 예약만 | **결정 대기** — 공유 클러스터 ACL(SASL/SCRAM + prefix ACL)은 Infra 후속, 그 전까지 ACL 없이 출발할지(#304 Q6) |
 
@@ -386,7 +386,23 @@ B2-E는 행 CAS와 동일 claim으로 중복 업무를 제어하고, 늦은 반�
 #582 C는 B2 DDL 적용 후 `service/order-service/src/test/resources/ddl/order-abandoned-confirmation.sql`을 UTF-8로
 `psql -v ON_ERROR_STOP=1 -f` 실행해 작업 원장의 출처 제약을 확장한다. 결제 소비와 스윕을 끄고 기존 호출을 drain한 뒤 모든 order 인스턴스를 교체한다.
 구버전 소비자는 신규 복원 fence를 알지 못하므로 섞어 실행하지 않는다. 기존 결제 소비·운영 결제 활성화 선행 조건을 지킨다.
-프로브 장애 분리 및 운영 알림은 #582 후속으로 확인한다.
+
+**#582 프로브 장애 분리 · 적체 경고 배포:** 새 DDL · Vault 비밀 · 환경변수는 없다. 새 설정 `order.payment-restoration.backlog-warn-age`(기본 30m) ·
+`backlog-error-age`(기본 2h, 1m ≤ warn < error ≤ 7d)는 yml 기본값을 쓴다. 스윕을 켠 인스턴스만 결제 전 취소 거절의 프로브 장애를 스윕으로 넘기고
+(`order-flow-guide.md` §3-6), 꺼진 인스턴스는 기존처럼 재시도 · DLT 다 — 스윕 설정을 인스턴스마다 다르게 두지 않는다.
+
+**#582 켜는 순서 체크리스트** — 결제 승인 소비 게이트(§4-4 ④)와 운영 결제 게이트(⑥)를 열기 전에 위에서부터 끝낸다.
+
+1. 운영 DDL: `ddl/order-stock-restoration.sql`(A) → `ddl/order-abandoned-confirmation.sql`(C). 둘 다 UTF-8 · `psql -v ON_ERROR_STOP=1 -f`.
+2. 결제 승인 소비 · 스윕을 끈 채 모든 order 인스턴스를 이 버전으로 교체하고 구버전 소비 · 트랜잭션 · 원격 호출을 drain 한다. 섞어 실행하지 않는다.
+3. A DDL/backfill 을 다시 실행해 혼합 배포 중 누락을 채운다.
+4. **#582 C 이전 버전이 남긴 결제 승인 DLT 는 product 가 정상일 때 재처리한다.** 그 시기 확정은 확정 시도 행이 없어 해제 프로브만 찾을 수 있다 —
+   product 장애 중에 재처리하면 거절 회신은 나가도 확정 선점이 복원되지 않는다(돈이 아닌 재고 누수).
+5. 모든 order 인스턴스에 `ORDER_PAYMENT_RESTORATION_SWEEP_ENABLED=true` 를 주입하고 기동 검사(스키마 · Feign 예산) 통과를 확인한다.
+6. 게이지 `commerce.order.payment-restoration.pending.count` · `held.count` · `pending.oldest.age` 를 확인한다. HELD 가 있으면 원인을 고친 뒤 넘어간다.
+7. 운영 알림 규칙을 건다 — ERROR `payment restoration backlog too old`, WARN `payment restoration held for manual review` · `payment restoration backlog aging`,
+   그리고 결제 반영 DLT(`commerce.messaging.consumer.dlt.total` · #477 A2 어드민 CRITICAL 알림, "DLT 알림 활성화 (#477 A2)").
+8. 그 뒤에 §4-4 ④ 결제 승인 소비 게이트, ⑤ 이후를 순서대로 연다. 끌 때는 거꾸로 — 소비 게이트를 먼저 닫고 스윕은 마지막에 끈다(작업 행 · 락 기록 보존).
 
 ### 취소 원천 재고 복원 배포 (#14 C2b)
 

@@ -734,7 +734,15 @@ gate OFF에서는 기존 required-topics(만료 토픽)만 확인하므로 기�
 | `PRODUCT_026` · `PRODUCT_031` · 5xx · 타임아웃 · 서킷 | 503 `ORDER_002` — Kafka 재시도. product 장애가 재시도 예산(아래 "재시도와 liveness")보다 길면 DLT |
 | 409 `PRODUCT_024` 둘 | 500 `ORDER_017` — DLT(재선점은 앞 선점이 풀렸을 때만 하므로 데이터 이상) |
 
-**결제 전 취소 거절도 이제 product 해제 프로브에 의존한다** — 프로브가 성공해야 거절을 기록 · 회신하므로 product 장애가 길면 이 거절도 DLT 로 간다.
+**결제 전 취소 거절과 product 가용성 (#582)** — 프로브가 503 `ORDER_002`(위 표의 장애 행)로 끝나면 스윕 켜짐 여부로 갈린다.
+
+- 스윕 켜짐(`order.payment-restoration.sweep.enabled=true`) — 확정 없음으로 보고 일반 `REJECTED_ORDER_CANCELED` 거절을 기록 · 회신한다(WARN 한 줄).
+  환불이 product 장애를 기다리지 않는다. #582 C 이후 원격 확정은 모두 `CONFIRMATION_ATTEMPT` 행을 먼저 커밋하므로, 프로브가 못 본 확정 선점은
+  스윕이 그 행을 "결제 기록은 있으나 이 선점을 책임지지 않음"으로 판정해 `ABANDONED_CONFIRMATION` 으로 바꾸고, product 가 돌아오면 같은 claim 으로 복원한다.
+  복원은 원장에만 남고 회신을 더 내지 않는다 — 회신은 이 거절 한 번이다.
+- 스윕 꺼짐 — 복원할 주체가 없으므로 기존처럼 재시도 · DLT 다.
+- `ORDER_017`(확정 둘) 등 다시 해도 같은 불일치는 스윕 여부와 무관하게 DLT 다.
+- 남는 틈: #582 C 이전 버전이 남긴 확정(작업 행 없음)은 프로브만 찾을 수 있다. 그 시기의 DLT 는 product 가 정상일 때 재처리한다(`deploy-guide.md` #582 체크리스트).
 
 복원(멱등) — 이번 처리가 확정 200을 받은 경합(버전 충돌 → 다시 읽어 CANCELED)도 같은 경로다. 최종 짧은 트랜잭션은 기존 주문 소유 NOWAIT 잠금을 재사용하며
 `orders → order_payment → inbox/outbox` 순서로 처리한다. PAID 기록 선행이면 복원하지 않고, 같은 주문·선점의 모든 payment 복원 의도(대기/완료)가 있으면 claim을 복제하지 않는다.
@@ -804,6 +812,21 @@ PAID는 자기 선점의 후보를 같은 트랜잭션에서 인수한다. B1 �
 상품이 CONFIRMED 상태를 보존하는 선점은 같은 주문에서 다시 사용할 수 없다. 구매를 계속하려면 새 주문이 필요하다.
 오류와 복원 뒤 커밋 실패는 B2의 lease·재시도·HELD 정책을 따른다. 아직 결제 결정이 없는 후보는 나중에 다시 조회하며 원격 효과를 내지 않는다.
 배포 전에 원장 출처 제약은 `ddl/order-abandoned-confirmation.sql`로 적용한다. 이전 소비자가 남긴 미기록 선점은 복원 근거를 별도로 확인한다.
+
+**#582 지표 · 적체 경고:** order 가 아래 게이지를 단다. 조회 실패는 NaN 과 `commerce.order.payment-restoration.observation.failed.total` 이다(정상 0 과 구분).
+
+| 지표 | 뜻 |
+|------|-----|
+| `commerce.order.payment-restoration.pending.count` | `RESTORE_PENDING` 작업 수(확정 시도 후보 포함 — 정상 결제에서도 잠깐 생긴다) |
+| `commerce.order.payment-restoration.held.count` | `HELD` 작업 수 — 0 이 아니면 사람이 볼 대상 |
+| `commerce.order.payment-restoration.pending.oldest.age` | 가장 오래된 대기 작업의 등록 뒤 시간(초) |
+| `commerce.messaging.consumer.dlt.total{topic=…payment.payment-approved.dlt}` | 결제 반영 DLT 건수(messaging-core). #477 A2 가 같은 DLT 를 어드민 CRITICAL 알림으로 낸다 |
+
+스윕 틱마다 가장 오래된 대기 나이가 `order.payment-restoration.backlog-warn-age`(기본 30분) 이상이면 WARN
+`payment restoration backlog aging`, `backlog-error-age`(기본 2시간) 이상이면 ERROR `payment restoration backlog too old`,
+HELD 가 있으면 WARN `payment restoration held for manual review` 를 남긴다(건수 · 나이만, 같은 심각도는 1분에 한 번). 운영 알림 규칙은 이 문구를 잡는다.
+스윕이 꺼져 있으면 경고도 없으므로 게이지를 함께 본다. HELD 해제는 원인을 고친 뒤 운영 SQL 로 `RESTORE_PENDING` 으로 되돌린다.
+어드민 화면 알림(HELD · 장기 대기)은 후속 #808 이다.
 
 payment의 #591 재대조는 order 원천 `order_payment` 결과가 이미 존재하지만 회신 전달이 유실·DLT로 끝난 경우에만 payment 기록을 복구한다. 승인 소비가 DLT로 가 원천 결과가 없거나 재고 복원 처리가 멈춘 경우를 해결하지 않으며, 이 경로는 #582 복원과 재전달이 담당한다. 원천 거절 기록만으로 복원 완료를 추정하지 않고 실제 자동 PG 취소는 #579가 실행 직전 상태·잔액을 다시 검증한다.
 
