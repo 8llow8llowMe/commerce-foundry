@@ -50,6 +50,12 @@ spring:
           toss-payments:
             connect-timeout: 2000
             read-timeout: 6000
+          # 토스 정산 조회 클라이언트(TossSettlementsClient, #219)만의 타임아웃 (ms). 사용자 요청 경로가 아닌 배치 조회라 토스 권고대로 read 60초 이상이다 —
+          # TossSettlementsStartupGuard 가 없거나 0 이하 · 60000 미만이면 기동을 막는다. 승인 클라이언트(toss-payments)의 10초 상한과 섞지 않는다.
+          # logger-level 은 두지 않는다(설정 클래스 기본 NONE). HEADERS · FULL 이면 시크릿 키가 로그에 남아 가드가 막는다
+          toss-settlements:
+            connect-timeout: 2000
+            read-timeout: 60000
 
 # 외부 · 서비스 간 호출 서킷 (coding-conventions.md §10). TossPaymentsResponseSupport · OrderInternalResponseSupport 가 인스턴스 이름으로 감싼다.
 # spring.cloud.openfeign.circuitbreaker 통합은 켜지 않는다 — 서킷과 결과 분류를 한 곳(support)에서 한다
@@ -125,6 +131,10 @@ payment:
   enabled: false
   prepare:
     min-remaining: 10m
+  # PG 정산 수집 · 대사(#219, payment-guide.md §10) — 기본 꺼짐. 꺼져 있으면 대사 요청을 DB · PG 전에 409 SETTLEMENT_001 로 거절한다.
+  # 정산 조회 응답 계약(미확인 가정 2건)을 고객사 · 토스와 확인하고 운영 DDL 을 적용한 뒤에만 켠다. 켜면 기동 때 정산 테이블을 확인한다(PaymentSettlementSchemaGuard)
+  settlement:
+    enabled: ${PAYMENT_SETTLEMENT_ENABLED:false}
 
 # 토스페이먼츠 (payment-guide.md §2). 키 형식 · 프로파일 조건은 TossPaymentsStartupGuard 가 기동 때 본다
 toss:

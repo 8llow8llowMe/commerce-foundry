@@ -11,7 +11,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -34,15 +33,12 @@ import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentTransitionException;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentUnknownReason;
 import com.commercefoundry.domainlayer.payment.support.PaymentFixtures;
-import com.github.tomakehurst.wiremock.WireMockServer;
+import com.commercefoundry.support.TossWireMockSupport;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -60,45 +56,18 @@ import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * 토스 어댑터를 실제 Feign 클라이언트 · 서킷 · yml 설정으로 가짜 토스 서버(WireMock)에 붙여 결과 분류 표를 재현한다 ({@code payment-guide.md} §11).
- * 키는 형식만 흉내 낸 더미다 — 실키가 아니다.
+ * 키는 형식만 흉내 낸 더미다 — 실키가 아니다. 가짜 서버 · 동적 속성은 {@link TossWireMockSupport} 에 있다 — 정산 어댑터 시험과 Spring 컨텍스트를 같이 쓴다.
  */
 @SpringBootTest
 @ActiveProfiles("test")
 @ExtendWith(OutputCaptureExtension.class)
-class TossPaymentGatewayAdapterWireMockTest {
+class TossPaymentGatewayAdapterWireMockTest extends TossWireMockSupport {
 
-    /** 형식만 맞춘 더미 키. OS 환경변수 TOSS_SECRET_KEY 가 있어도 이 값으로 덮는다. */
-    private static final String SECRET_KEY = "test_sk_dummyWireMockOnly0001";
-    private static final String EXPECTED_AUTHORIZATION = "Basic " + Base64.getEncoder().encodeToString((SECRET_KEY + ":").getBytes(StandardCharsets.UTF_8));
     private static final String CONFIRM_PATH = "/v1/payments/confirm";
     private static final String PG_ORDER_ID = Long.toString(PaymentFixtures.PAYMENT_ID);
     private static final String INQUIRY_PATH = "/v1/payments/orders/" + PG_ORDER_ID;
     private static final String PAYMENT_KEY_INQUIRY_PATH = "/v1/payments/" + PAYMENT_KEY;
-    /**
-     * 응답 타임아웃을 줄여 타임아웃을 빨리 재현한다. 너무 짧으면 느린 CI 에서 정상 응답도 타임아웃으로 떨어지므로 2초로 둔다.
-     * 지연 스텁은 이 두 배({@link #TIMEOUT_DELAY_MILLIS})다.
-     */
-    private static final int READ_TIMEOUT_MILLIS = 2_000;
-    private static final int TIMEOUT_DELAY_MILLIS = READ_TIMEOUT_MILLIS * 2;
     private static final String REJECTION_MESSAGE = "카드사에서 거절했습니다. 고객 확인이 필요합니다.";
-
-    /**
-     * 클래스 전체에서 한 번만 띄운다. JUnit 확장({@code WireMockExtension})은 {@code @Nested} 클래스마다 멈췄다 새 포트로 다시 띄워,
-     * 처음 만든 Spring 컨텍스트(캐시)가 가리키는 주소가 닫힌다.
-     */
-    static final WireMockServer TOSS = startedServer();
-
-    @AfterAll
-    static void stopServer() {
-        TOSS.stop();
-    }
-
-    @DynamicPropertySource
-    static void tossProperties(DynamicPropertyRegistry registry) {
-        registry.add("toss.base-url", TOSS::baseUrl);
-        registry.add("toss.secret-key", () -> SECRET_KEY);
-        registry.add("spring.cloud.openfeign.client.config.toss-payments.read-timeout", () -> READ_TIMEOUT_MILLIS);
-    }
 
     @Autowired
     private PaymentGatewayPort paymentGatewayPort;
@@ -111,12 +80,6 @@ class TossPaymentGatewayAdapterWireMockTest {
         // 테스트끼리 스텁 · 받은 요청 · 서킷 실패 횟수를 나눠 갖지 않게 한다
         TOSS.resetAll();
         circuitBreaker().reset();
-    }
-
-    private static WireMockServer startedServer() {
-        WireMockServer server = new WireMockServer(wireMockConfig().dynamicPort());
-        server.start();
-        return server;
     }
 
     @Nested

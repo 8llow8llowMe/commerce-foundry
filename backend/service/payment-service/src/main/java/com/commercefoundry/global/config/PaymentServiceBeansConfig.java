@@ -41,6 +41,12 @@ public class PaymentServiceBeansConfig {
         return new TossPaymentsStartupGuard(environment);
     }
 
+    /** 토스 정산 조회 클라이언트 타임아웃 · 로그 기동 가드 (#219, {@code payment-guide.md} §10). static — 위 가드와 같은 이유다. */
+    @Bean
+    public static TossSettlementsStartupGuard tossSettlementsStartupGuard(Environment environment) {
+        return new TossSettlementsStartupGuard(environment);
+    }
+
     /** 결제 게이트가 열려 있으면 outbox 테이블이 있어야 기동한다 (#308, {@code payment-guide.md} §6). */
     @Bean
     public PaymentOutboxSchemaGuard paymentOutboxSchemaGuard(

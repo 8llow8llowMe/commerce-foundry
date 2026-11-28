@@ -2,6 +2,7 @@ package com.commercefoundry.domainlayer.payment.adapter.out.persistence.reposito
 
 import com.commercefoundry.domainlayer.payment.adapter.out.persistence.entity.PaymentEntity;
 import com.commercefoundry.domainlayer.payment.domain.model.PaymentStatus;
+import com.commercefoundry.shared.commerce.CurrencyCode;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.QueryHint;
 import java.time.Instant;
@@ -43,6 +44,18 @@ public interface PaymentRepository extends JpaRepository<PaymentEntity, Long> {
 
     /** {@code uk_payment_member_approval_key} 로 찾는다 — 회원이 같은 Idempotency-Key 로 승인을 시작한 결제 시도는 많아야 하나다. */
     Optional<PaymentEntity> findByMemberIdAndApprovalIdempotencyKey(Long memberId, String approvalIdempotencyKey);
+
+    /** 정산 대사(#219) — 결제키 목록으로 찾는다({@code uk_payment_payment_key}). 호출자가 목록을 나눠 IN 절 크기를 제한한다. */
+    List<PaymentEntity> findAllByPaymentKeyIn(Collection<String> paymentKeys);
+
+    /**
+     * 정산 대사(#219) — PG 승인 시각 {@code [from, to)} · 결제 통화. {@code approved_at} 인덱스가 없어 표를 훑는다 — 하루 범위를 하루 몇 번 읽는 배치라 받아들이고,
+     * 운영 데이터로 실행계획을 본 뒤 인덱스를 검토한다({@code payment-guide.md} §10).
+     */
+    @Query("select p from PaymentEntity p where p.approvedAt >= :from and p.approvedAt < :to and p.totalCurrency = :currency")
+    @QueryHints(@QueryHint(name = "jakarta.persistence.query.timeout", value = "5000"))
+    List<PaymentEntity> findApprovedBetween(Instant from, Instant to, CurrencyCode currency);
+
     // count/min은 같은 모집단을 사용하지만 별도 트랜잭션의 독립 관측이다.
     String AWAITING_ORDER_REPLY = " from PaymentEntity p where p.status in :statuses and p.orderSynced = false"
         + " and p.orderSyncFailureCode is null and p.approvedAt < :approvedBefore";

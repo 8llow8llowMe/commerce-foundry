@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentEventPort;
 import com.commercefoundry.domainlayer.payment.application.port.out.PaymentGatewayPort;
+import com.commercefoundry.domainlayer.settlement.application.port.out.SettlementGatewayPort;
 import com.commercefoundry.global.config.TossPaymentsStartupGuard;
+import com.commercefoundry.global.config.TossSettlementsStartupGuard;
 import com.commercefoundry.messaging.outbox.OutboxStore;
 import com.commercefoundry.messaging.properties.MessagingProperties;
 import com.commercefoundry.messaging.publish.EventPublisher;
@@ -58,6 +60,9 @@ class PaymentServiceApplicationTests {
         // 토스 어댑터 · 키 기동 가드 — test 프로파일의 더미 test_ 키로 가드를 통과한다
         assertThat(applicationContext.getBeanNamesForType(PaymentGatewayPort.class)).hasSize(1);
         assertThat(applicationContext.getBeanNamesForType(TossPaymentsStartupGuard.class)).hasSize(1);
+        // 정산 조회 클라이언트(toss-settlements, #219) — 승인 클라이언트와 이름이 겹치지 않고, yml 타임아웃(read 60s)으로 가드를 통과한다
+        assertThat(applicationContext.getBeanNamesForType(SettlementGatewayPort.class)).hasSize(1);
+        assertThat(applicationContext.getBeanNamesForType(TossSettlementsStartupGuard.class)).hasSize(1);
         assertThat(applicationContext.getBeansOfType(GroupedOpenApi.class).values())
             .extracting(GroupedOpenApi::getGroup)
             .containsExactlyInAnyOrder("customer", "admin");

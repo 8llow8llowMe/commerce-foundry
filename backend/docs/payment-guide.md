@@ -1001,8 +1001,53 @@ tx2 는 결제 행을 다시 잠그고 스냅숏(이 claimId 행 상태 · 두 �
 
 ## 10. 대사 (reconciliation)
 
-- 하루 한 번 우리 `DONE`/`CANCELED` 기록과 PG 거래 내역을 대조한다. 어긋난 건은 어드민에 노출한다.
-- 처음에는 수동 점검(어드민 목록 + PG 상점관리자)으로 시작하고, 배치는 `batch-service` 를 만들 때 붙인다.
+PG 정산 내역을 우리 결제 기록과 매일 대조한다(#219). **수집 · 대사는 payment-service 의 `settlement` 컨텍스트**가 하고, 정기 실행은 operations 작업 엔진(#212)의
+정기 작업이 internal API 를 부른다(PR2). 불일치 수동 처리 · 어드민 API 는 PR3, CSV 는 PR4 다. 별도 batch 서비스는 두지 않는다.
+
+- **기능 플래그 `payment.settlement.enabled`(env `PAYMENT_SETTLEMENT_ENABLED`) 기본 OFF.** 꺼져 있으면 대사 요청을 DB · PG 전에 409 `SETTLEMENT_001` 로 거절한다.
+  아래 미확인 가정을 고객사 · 토스와 확인하고 운영 DDL(새 표 셋)을 적용한 뒤에만 켠다. 켜면 기동 때 표를 확인한다(`PaymentSettlementSchemaGuard`).
+- **진입** — `POST /internal/v1/settlements/reconcile` 본문 `{soldDate: "yyyy-MM-dd"}`, `SERVICE_operations-service` 만(`@Hidden`, `Cache-Control: no-store`).
+  매출일은 필수(`SETTLEMENT_101`)이고 오늘(KST) 이후 · 90일보다 앞선 날짜는 400 `SETTLEMENT_102`, 형식 오류는 `PAYMENT_100` 이다.
+  응답 `{soldDate, itemCount, pgAmountTotal{amount, currency}, mismatchCount, newMismatchCount, autoClearedCount, graceDeferredCount, status(metadata)}` —
+  결제키 · 주문/회원/결제 식별자는 싣지 않는다. `pgAmountTotal` 은 승인 + · 취소 − 합이라 음수일 수 있다.
+- **기준일** — PG 매출일(soldDate, KST 날짜). 같은 매출일을 몇 번 불러도 결과가 같다(멱등) — 정기 실행은 매일 07:00 에 최근 7일을 날짜별로 다시 부른다(PR2).
+- **흐름** — Facade 는 트랜잭션을 걸지 않는다. ① PG 수집(트랜잭션 밖, 모든 페이지) → ② 짧은 트랜잭션: 매출일 행(`settlement_day`) 잠금 · COLLECTED, 거래(`pg_settlement_item`) 거래키 upsert →
+  ③ 대사 트랜잭션(30초): 매출일 행 재잠금 · payment 원장 조회(`PaymentLedgerProcessor` — 결제키 IN · 승인 기간 · 취소 IN) · 판정 · 불일치(`settlement_mismatch`) 기록 · RECONCILED.
+  수집이 실패하면 매출일을 FAILED 로 남기고 503 `SETTLEMENT_003` 이다 — 호출자가 다시 부른다.
+- **동시 실행** — 같은 매출일은 매출일 행 `for no key update nowait` 로 둘째가 기다리지 않고 409 `SETTLEMENT_002` 다. 첫 실행 경합은 매출일 유니크 키,
+  다른 날짜 대사의 같은 결제 경합은 불일치 (결제키, 종류) 유니크 키 · `@Version` 이 409 로 막는다.
+- **대상** — (a) 그 매출일에 수집된 KRW 거래의 결제키 전부 ∪ (b) 승인 시각이 매출일 KST 하루 `[00:00, 다음 날 00:00)` 안인 KRW 결제 전부. 결제키마다 판정한다.
+  **USD 결제 · 거래는 저장만 하고 대사 · 요약에서 뺀다(#738).**
+- **판정** — 결제키 단위 누계로 맞춘다(우리 취소 원장에 PG 거래키가 없어 건별 매칭은 하지 않는다). 그 결제키의 **수집된 모든** 거래(매출일 무관)를 본다.
+  PG 승인합 = Σ 승인 금액, PG 취소합 = Σ |취소 금액|, 우리 쪽은 결제 금액과 `PaymentCancelLedger.pgCanceled`(PG 밖 환불 제외)다. 정본은 `SettlementReconciliation`.
+
+| 종류 | 조건 | 기대(우리) | 실제(PG) |
+|------|------|-----------|----------|
+| `MISSING_IN_LEDGER` | 결제 기록에 결제키가 없다 | 0 | PG 순액 |
+| `STATUS` | PG 승인 거래가 있는데 결제 기록이 결제됨 계열(`PaymentStatus.hasApproval` — DONE · PARTIAL_CANCELED · CANCELED · LATE_APPROVED)이 아니다 | 0 | PG 승인합 |
+| `AMOUNT` | PG 승인 거래가 있고 승인합 ≠ 결제 금액 | 결제 금액 | PG 승인합 |
+| `CANCEL_TOTAL` | PG 승인 거래가 있고 취소합 ≠ `pgCanceled` | `pgCanceled` | PG 취소합 |
+| `MISSING_IN_PG` | 결제됨 계열 · 승인 시각이 매출일인데 PG 승인 거래가 없다 — **오늘(KST) ≥ 매출일 + 3일** 일 때만 기록, 그 전은 `graceDeferredCount` 로만 센다 | 결제 금액 | 0 |
+
+- STATUS · AMOUNT · CANCEL_TOTAL 은 PG 승인 거래가 수집된 결제에만 판정한다 — 결제 기록만 있으면 PG 누락만 보고(유예 포함), 취소 거래만 수집됐으면(승인이 수집 범위 밖)
+  판정을 미룬다. 그러지 않으면 PG 반영이 늦은 결제마다 유예 없이 AMOUNT 가 쌓인다.
+- **불일치 행** — (결제키, 종류)마다 한 행이다. 다시 찾으면 금액 · 발견 시각만 바꾸고 RESOLVED 였으면 OPEN 으로 되돌린다(처음 발견 매출일은 그대로).
+  판정했는데 더는 어긋나지 않으면 OPEN → RESOLVED(`AUTO_CLEARED`). 판정할 근거가 없던 종류(유예 중 · 승인 미수집)의 기존 불일치는 그대로 둔다.
+  `mismatchCount` 는 이번 대사가 본 결제들의 OPEN 수, `newMismatchCount` 는 새로 열리거나 다시 열린 수다. 수동 RESOLVED(`MANUAL`)는 PR3 가 enum · check 와 함께 더한다.
+- **토스 정산 조회** — `GET {toss.base-url}/v1/settlements?startDate=D&endDate=D&dateType=soldDate&page=N&size=5000`(Basic 인증은 승인과 같은 시크릿 키).
+  별도 Feign 클라이언트 `toss-settlements`: connect 2s · **read 60s**(토스 권고) — `TossSettlementsStartupGuard` 가 없거나 0 이하 · 60s 미만 · 로그 HEADERS/FULL 이면 기동을 막는다.
+  승인 클라이언트(`toss-payments`)의 10초 상한과 섞지 않는다. Feign 재시도는 끄고, **429 만** 어댑터가 최대 3회 1s → 2s → 4s(Retry-After 초가 있으면 그 값, 상한 30s) 다시 부른다.
+  5xx · 타임아웃 · 연결 실패는 다시 부르지 않고 수집 실패다. 결제 승인용 `toss` 서킷을 같이 쓰지 않는다(정산 실패가 결제 서킷을 열면 안 된다) — 하루 몇 번 부르는 배치라 별도 서킷도 두지 않는다.
+  한 번의 대사가 페이지마다 최대 60초 + 백오프까지 걸리므로 **호출자(operations 작업) read timeout 은 그보다 길어야 한다**(PR2).
+- **미확인 가정 — 운영 켜기 전 고객사 · 토스 확인** (`TossSettlementGatewayAdapter#parsePage` 한 메서드에 모았다)
+  1. 응답 최상위는 JSON 배열(항목 목록)이고 `page` 는 1부터, 마지막 페이지 = 받은 건수 < size 다. 래퍼 객체면 그 메서드만 바꾼다.
+  2. 취소 거래는 항목에 `cancel` 객체가 있거나 `amount` 가 음수다. 양수로 와도 취소면 음수로 정규화한다.
+  - 수수료 합 = Σ `fees[].supplyAmount`, 지급 금액 = `payOutAmount` — 저장 · 합계만 하고 판정에 쓰지 않는다(수수료 계산 검증은 범위 밖).
+  - 필수 칸(거래키 · 결제키 · 통화 · 금액 · 매출일) 누락, 요청과 다른 매출일, 통화 자릿수 초과, 같은 거래키의 다른 내용은 계약 위반 — 부분 결과 없이 수집 실패다.
+- **로그** — 시크릿 · Authorization · 결제키 · 주문번호를 남기지 않는다(매출일 · 페이지 · 상태 코드 · 예외 타입 · 건수만).
+- **인덱스** — 원장 쪽 승인 기간 조회는 `payment.approved_at` 인덱스가 없어 표를 훑는다. 하루 범위를 하루 몇 번 읽는 배치라 받아들이고 운영 실행계획을 본 뒤 검토한다.
+- **운영 DDL** — 새 표 `payment.pg_settlement_item` · `payment.settlement_day` · `payment.settlement_mismatch`(기존 표 변경 없음). 스냅숏 `ddl/payment-schema.sql` 에서 옮겨
+  플래그를 켜기 전에 적용한다. 수동 점검(어드민 결제 목록 + 토스 상점관리자)은 PR3 의 불일치 목록이 생기기 전까지 그대로다.
 
 ## 11. 테스트
 

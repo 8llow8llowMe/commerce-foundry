@@ -239,6 +239,8 @@ public final class ProductValidationMessage {
   검증 `{CONTEXT}_101~` 을 자기 `ErrorCode` · `ValidationMessage` 에 두고, 폴백 · 타입 불일치 · 필수 파라미터(`_100` · 대역 끝 2개)는 서비스 공용 코드를 그대로 쓴다.
   서비스 공용 검증 핸들러는 메시지 앞의 코드를 읽으므로 접두어가 달라도 고칠 것이 없다. 예: product-service 룩(#62) — `PRODUCT_1xx` 소진, `LOOK_001~008` · `LOOK_101~122`.
   SKU 원가(#361)도 같다 — `SKU_COST_001~006` · `SKU_COST_101~110`.
+  payment-service 정산(#219)은 `PAYMENT_1xx` 가 남아 있지만 컨텍스트가 달라 `SETTLEMENT_001~003` · `SETTLEMENT_101~102` 를 연다. 정산 핸들러는 범위가 settlement 패키지라
+  payment 요청 검증 advice 와 같은 컨트롤러를 두고 겹치지 않으며, 폴백은 서비스 공용 `PAYMENT_100` 이다.
 
 ### 8-3. 하드코딩된 문자열 금지
 

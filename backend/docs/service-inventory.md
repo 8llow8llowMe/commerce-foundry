@@ -124,11 +124,16 @@ operations-service는 상품 상세 조회를 수집하고 일별·기간별 조
 | operations-service | product-service | 품절 임박 커서 조회(`GET /internal/v1/stocks/low`, #229 PR-2). operations-service만 허용하는 조회 기반이며 소비자 클라이언트·스케줄러·알림 연결은 후속 |
 | operations-service | product-service | AI 상품 초안 생성 입력 · 이미지 바이트(`GET /internal/v1/product-drafts/{draftId}/generation-input` · `…/generation-images/{index}`, #359 PR-2a 계약). 생성 요청 때 고정한 관리 키 · ETag 로만 읽고 바뀌었으면 410 `PRODUCT_DRAFT_044`. 플래그 `product-draft.generation-enabled` 기본 닫힘. `PRODUCT_DRAFT_GENERATE` 작업(#359 PR-2b)이 시도마다 입력 1번 + 이미지 순번마다 1번(최대 8) 부른다. `ProductDraftGenerationInputClient`(contextId 같은 이름, 읽기 10초), 서킷 `product-service`. 4xx 는 재시도 불가 종결(410 `044` → `IMAGE_CHANGED`), 5xx · 서킷은 재시도 |
 | product-service | operations-service | AI 상품 초안 생성 등록(`POST /internal/v1/product-draft-generation-jobs`) · 결과 조회(`GET /internal/v1/product-draft-generation-jobs/{jobId}/result`) (#359 등록 연결 B1, 결과 반영 B2). (draft ID, 회차 1~3) 영수증으로 재생하고 hash · 요청자 · 만료가 다르면 409 `PRODUCT_DRAFT_GENERATION_002`. product 는 초안 커밋 뒤 회차를 claim 해 등록하고 jobId 를 묶는다. 상품 초안 전용 서킷을 써 사이즈표 호출과 분리한다. 플래그 `operations.product-draft-generation.enabled` 기본 닫힘(신규 등록만 503). 계약은 `api-design-guide.md` §7-3 |
+| operations-service | payment-service | PG 정산 수집 · 대사(`POST /internal/v1/settlements/reconcile`, 본문 매출일, #219). 받는 API 는 PR1(기능 플래그 기본 OFF), 정기 작업 · 호출 Feign 은 PR2 — 같은 매출일 재호출은 멱등이고 409 `SETTLEMENT_002`(동시 실행) · 503 `003`(PG 수집 실패)은 재시도 대상이다. PG 조회가 페이지마다 최대 60초라 호출자 read timeout 은 그보다 길어야 한다 |
 | operations-service | auth-service | 마케팅 동의 `POST /internal/v1/marketing-consents/query` (#230). PR-B의 ADMIN 수신자 미리보기에서 실제 Feign 호출(`campaignConsentClient`, 서킷 `auth-service`). 최대100개 ID, 이름·연락처 없음. 실패·응답 계약 위반은503. 실제 발송 연결은 후속. |
 
 operations-service의 정상 승인 집계 읽기 권한(#550): payment-service가
 `GET /internal/v1/payments/approval-summary?from=&to=`를 operations 전용으로 제공한다. 승인일 기준 최대 31일의 통화 · 수단별 건수와 원금을
 단일 질의로 반환하며 식별자 · 결제키는 없다. 취소 뒤에도 최초 승인액을 유지하고 늦은 승인은 제외한다. 호출 구현 · 리포트 연결은 #220 후속이다.
+
+operations-service의 PG 정산 대사 실행 권한(#219): payment-service가 `POST /internal/v1/settlements/reconcile`(본문 매출일)을 operations 전용으로 제공한다.
+payment `settlement` 컨텍스트가 토스 정산 조회(별도 Feign `toss-settlements`, read 60초) · 거래 저장 · 결제 원장 대사 · 불일치 기록을 소유하고, operations 는 정기 작업으로
+매일 최근 7일을 날짜별로 부른다(PR2 — 호출 Feign · read timeout 60초 초과 · 재시도는 그쪽). 기능 플래그 기본 OFF다. 규칙은 `payment-guide.md` §10.
 
 operations-service의 payment outbox 원천 관측 권한(#477 A3a): payment-service의
 `GET /internal/v1/outbox-observations/ready`는 `SERVICE_operations-service`만 허용한다. 미래 예약을 제외한 발행 가능 미발행 건수·최소시각을

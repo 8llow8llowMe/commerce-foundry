@@ -107,6 +107,11 @@ WebSocket 경로 `/ws/v1/support/**` 는 이 표의 REST 경로가 아니다 —
   grossApprovedAmount:{amount, currency}}]}`를 기존 봉투로 반환한다. 그룹은 통화 · 수단 코드순, 빈 범위는 빈 배열이다.
   결제/주문/회원 식별자 · 결제키 없이 정상 승인 원금만 집계하며 취소 뒤에도 승인액을 유지한다. 누락 · 형식 `PAYMENT_118~121`, 기간 `122`는 400,
   합계 overflow는 500 `PAYMENT_020`으로 전체 실패다. 상세 조건과 성능 한계는 `payment-guide.md` "리포트용 정상 승인 집계 internal"을 따른다. FE 직접 영향은 없다.
+- PG 정산 수집 · 대사(단건 명령): payment-service `POST /internal/v1/settlements/reconcile` 본문 `{soldDate}` (#219 PR1). 허용 호출자는 operations-service 하나다
+  (정기 작업 연결은 PR2). 기능 플래그 `payment.settlement.enabled` 기본 OFF면 409 `SETTLEMENT_001`, 같은 매출일 동시 실행 409 `002`, PG 수집 실패 503 `003`,
+  매출일 누락 400 `101` · 오늘(KST) 이후 · 90일 초과 `102` · 형식 오류 `PAYMENT_100`. 같은 매출일을 다시 불러도 결과가 같다(멱등, 멱등 키 헤더 없음 — 매출일이 키).
+  `Cache-Control: no-store`, 응답 `{soldDate, itemCount, pgAmountTotal(§2-3, 음수 가능), mismatchCount, newMismatchCount, autoClearedCount, graceDeferredCount,
+  status(metadata)}` 에 결제키 · 식별자는 없다. PG 조회가 페이지마다 최대 60초라 호출자 read timeout 은 그보다 길어야 한다. 규칙은 `payment-guide.md` §10. FE 직접 영향은 없다.
 - 시점 원가(벌크): product-service `POST /internal/v1/sku-costs/query` (#361 PR-B). 허용 호출자는 operations-service(공헌이익 집계 #362).
   조회 키가 `ids` 가 아니라 (SKU, 시각) 쌍 목록이라 본문으로 받는 **읽기 전용 POST** 다 — 위 표의 상한(원문 100개) · 중복(첫 등장 순서로 합침) · 없는 아이디(뺌) ·
   순서(요청 순서) · in 절 벌크 규칙은 그대로 따른다. 계약은 §2-12 "서비스 간 시점 원가 조회".

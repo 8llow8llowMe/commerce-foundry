@@ -8,6 +8,7 @@ import com.commercefoundry.global.properties.PaymentAutoCancelSchedulerPropertie
 import com.commercefoundry.global.properties.PaymentRecoveryProperties;
 import com.commercefoundry.global.properties.PaymentOrderReconciliationProperties;
 import com.commercefoundry.global.properties.PaymentPrepareProperties;
+import com.commercefoundry.global.properties.PaymentSettlementProperties;
 import com.commercefoundry.global.properties.TossPaymentsProperties;
 import com.commercefoundry.messaging.config.MessagingPropertiesConfig;
 import com.commercefoundry.persistence.config.SnowflakePropertiesConfig;
@@ -27,7 +28,7 @@ import org.springframework.context.annotation.Import;
 })
 @EnableConfigurationProperties({PaymentAutoCancelSchedulerProperties.class, PaymentGateProperties.class, PaymentRecoveryProperties.class,
     PaymentCancelVoidProperties.class, PaymentCancelExternalRefundProperties.class, PaymentOrderReconciliationProperties.class,
-    PaymentPrepareProperties.class, TossPaymentsProperties.class})
+    PaymentPrepareProperties.class, PaymentSettlementProperties.class, TossPaymentsProperties.class})
 public class PaymentServicePropertiesConfig {
 
 }
