@@ -17,7 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 상품 한 건의 기준통화 가격행 backfill. 상품마다 새 TX 를 열어 그 시점의 legacy 값과 가격행을 다시 읽는다.
  *
- * <p>계획은 B1b writer 와 같은 {@link LegacyPriceWriteProcessor#prepare} 에 같은 스냅숏을 before · after 로 넘겨 만든다 —
+ * <p>계획은 B1b writer 와 같은 조율기의 {@link LegacyPriceWriteProcessor#prepareBackfill}(모드와 상관없이 REPAIR) 에 같은 스냅숏을
+ * before · after 로 넘겨 만든다 —
  * 기존 행은 바꾸지 않고 빠진 기준통화 행만 legacy 값 · 실제 currency 그대로 INSERT 계획에 담긴다. drift · 통화 불일치 · 휴면 행은
  * 그 자리에서 예외로 거절되고(보정 없음) TX 가 롤백된다.
  *
@@ -40,7 +41,7 @@ public class PriceBackfillProductProcessor {
         }
         Product product = found.get(0);
         LegacyPriceSnapshot snapshot = LegacyPriceSnapshot.of(product, skuRepositoryPort.findAllByProductId(productId));
-        LegacyPriceWritePlan plan = legacyPriceWriteProcessor.prepare(snapshot, snapshot);
+        LegacyPriceWritePlan plan = legacyPriceWriteProcessor.prepareBackfill(snapshot, snapshot);
         if (!plan.productUpdates().isEmpty() || !plan.skuUpdates().isEmpty()) {
             // 같은 스냅숏이면 수정 계획이 나올 수 없다. 나오면 계약 위반이라 쓰지 않는다.
             throw new IllegalStateException("backfill 계획에 수정 행이 있습니다");
