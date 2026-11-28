@@ -29,8 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Repository
 public class PriceSourceSnapshotRepositoryAdapter implements PriceSourceSnapshotRepositoryPort {
-    private static final int MAX_PRODUCTS = 50;
-    private static final int MAX_SKUS = 2000;
+    // 상품 · SKU 행 상한은 포트 계약 상수(MAX_PRODUCTS · MAX_SKU_ROWS)다 — 호출자의 묶음 크기가 같은 값을 보고 정해진다
     private static final int CURRENCIES = CurrencyCode.values().length;
 
     private final ProductRepository productRepository;
@@ -116,8 +115,8 @@ public class PriceSourceSnapshotRepositoryAdapter implements PriceSourceSnapshot
             || !products.stream().map(entity -> entity.getId()).toList().equals(productIds)) {
             throw new SnapshotAbort(Reason.PRODUCT_MISSING);
         }
-        var skus = skuRepository.findAllByProductIdInOrderByProductIdAscIdAsc(productIds, PageRequest.of(0, MAX_SKUS + 1));
-        requireWithinLimit(skus.size(), MAX_SKUS);
+        var skus = skuRepository.findAllByProductIdInOrderByProductIdAscIdAsc(productIds, PageRequest.of(0, MAX_SKU_ROWS + 1));
+        requireWithinLimit(skus.size(), MAX_SKU_ROWS);
         int productPriceLimit = products.size() * CURRENCIES;
         var productPrices = productPriceRepository.findAllByProductIdInOrderByProductIdAscSalePriceCurrencyAscIdAsc(
             productIds, PageRequest.of(0, productPriceLimit + 1));

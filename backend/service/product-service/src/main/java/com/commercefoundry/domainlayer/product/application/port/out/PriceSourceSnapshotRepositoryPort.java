@@ -10,6 +10,15 @@ import java.util.List;
  */
 public interface PriceSourceSnapshotRepositoryPort {
 
+    /** 한 번에 읽을 수 있는 상품 수(중복 제거 후). 넘으면 SQL 없이 {@code INVALID_INPUT} 이다. 호출자의 묶음 크기가 이 값 이하여야 한다. */
+    int MAX_PRODUCTS = 50;
+
+    /**
+     * 한 번에 읽을 수 있는 SKU 행 수(요청한 상품의 전체 SKU). 넘으면 {@code ROW_LIMIT_EXCEEDED} 다 — 호출자는 묶음 상품 수 × 상품당 SKU 상한이
+     * 이 값을 넘지 않게 묶음을 잡는다(서비스 간 SKU 조회의 고정 시험이 이 관계를 단언한다).
+     */
+    int MAX_SKU_ROWS = 2000;
+
     /** 호출자 TX를 정지하고 새 REPEATABLE_READ read-only TX에서 읽는다 — snapshot 은 그 새 TX 의 시점이다. */
     PriceSourceSnapshotQueryResult readByProductIds(List<Long> productIds);
 

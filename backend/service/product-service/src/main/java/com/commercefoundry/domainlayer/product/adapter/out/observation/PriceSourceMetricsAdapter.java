@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 가격 원천 관측 지표의 Micrometer 구현. 태그는 사유 이름 하나뿐이다 — 상품 · SKU 아이디나 금액을 태그로 두지 않는다(카디널리티 · 노출).
+ * 카운터는 요청마다 응답에서 뺀 상품 수를 더한다 — 같은 상품이 조회마다 다시 세어지므로 고유 상품 수가 아니다.
  * MeterRegistry 가 없는 컨텍스트(슬라이스 시험)에서는 아무것도 하지 않는다. 지표 실패는 삼킨다 — 주문 금액 응답을 바꾸지 않고, 정제 WARN 로그가 남아 있다.
  */
 @Component
@@ -29,7 +30,7 @@ public class PriceSourceMetricsAdapter implements PriceSourceMetricsPort {
         }
         try {
             registries.ifAvailable(registry -> Counter.builder(EXCLUDED_PRODUCTS)
-                .description("PRICE_BOOK 서비스 간 SKU 조회가 가격 원천 해석 실패로 응답에서 뺀 상품 수")
+                .description("PRICE_BOOK 서비스 간 SKU 조회가 가격 원천 해석 실패로 요청마다 응답에서 뺀 상품 수(요청 x 상품, 고유 상품 수 아님)")
                 .tag(REASON_TAG, reason)
                 .register(registry)
                 .increment(count));

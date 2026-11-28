@@ -455,6 +455,48 @@ class SkuInternalProcessorTest {
             assertSingleSanitizedWarn(EXCLUDED_LOG.formatted(2, "{INVALID_PRICE_BOOK=1, LEGACY_DRIFT=1}"));
         }
 
+        /**
+         * 두 상품 모두 옵션 · 맞춤 제작(기능 플래그 켬)이 있어 뺀 상품의 옵션 값 · 입력 항목이 섞이면 인자가 달라진다 — strict stubs 라 남은 기준 인자가 아니면
+         * 스텁이 맞지 않아 실패하고, verify 로 한 번씩만 불렸음을 다시 본다.
+         */
+        @Test
+        @DisplayName("뺀 상품의 SKU 는 옵션 값 · 옵션 그룹 · 입력 항목 조회에서도 빠진다 — 남은 SKU · 상품 기준 인자로만 한 번씩 읽는다")
+        void excludedProductIsNotReadForOptionsOrCustomOrderFields() {
+            given(skuRepositoryPort.findAllByIds(List.of(102L, 101L))).willReturn(List.of(
+                ProductFixtures.sku(101, OK, "9001", 0, SaleStatus.ON_SALE),
+                ProductFixtures.sku(102, DRIFT, "5011", 0, SaleStatus.ON_SALE)));
+            given(productRepositoryPort.findAllByIdsIncludingHidden(Set.of(OK, DRIFT))).willReturn(List.of(
+                ProductFixtures.product(OK, SaleStatus.ON_SALE, true, true), ProductFixtures.product(DRIFT, SaleStatus.ON_SALE, true, true)));
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(OK, DRIFT))).willReturn(
+                new PriceSourceSnapshotQueryResult(List.of(OK, DRIFT),
+                    List.of(ProductFixtures.product(OK, SaleStatus.ON_SALE, true, true), ProductFixtures.product(DRIFT, SaleStatus.ON_SALE, true, true)),
+                    List.of(ProductFixtures.sku(101, OK, "9001", 0, SaleStatus.ON_SALE), ProductFixtures.sku(102, DRIFT, "5011", 0, SaleStatus.ON_SALE)),
+                    // 7002 의 상품 가격행이 legacy 판매가와 다르다(drift)
+                    List.of(productPrice(1, OK, ProductFixtures.BASE_PRICE), productPrice(2, DRIFT, ProductFixtures.BASE_PRICE + 1)),
+                    List.of(skuPrice(11, 101, 0), skuPrice(12, 102, 0))));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(101L))).willReturn(ProductFixtures.stocks(101));
+            given(productOptionRepositoryPort.findValuesByIds(Set.of(9001L))).willReturn(List.of(ProductFixtures.value(9001, SIZE, OK, "M", 1)));
+            given(productOptionRepositoryPort.findGroupsByIds(Set.of(SIZE))).willReturn(List.of(ProductFixtures.group(SIZE, OK, "사이즈", 1)));
+            given(productCustomOrderFieldRepositoryPort.findAllByProductIds(Set.of(OK))).willReturn(List.of(ProductFixtures.numberField(10, OK, "waist", 0)));
+
+            List<SkuInternalInfo> skus = priceBookProcessor().getSkus(List.of(102L, 101L));
+
+            assertThat(skus).singleElement().satisfies(sku -> {
+                assertThat(sku.skuId()).isEqualTo(101L);
+                assertThat(sku.optionName()).isEqualTo("M");
+                assertThat(sku.customOrder()).isTrue();
+                assertThat(sku.customOrderFields()).extracting(CustomOrderFieldDefinition::fieldKey).containsExactly("waist");
+            });
+            verify(stockRepositoryPort).findAllBySkuIds(List.of(101L));
+            verify(productOptionRepositoryPort).findValuesByIds(Set.of(9001L));
+            verify(productOptionRepositoryPort).findGroupsByIds(Set.of(SIZE));
+            verify(productCustomOrderFieldRepositoryPort).findAllByProductIds(Set.of(OK));
+            verifyNoMoreInteractions(stockRepositoryPort, productOptionRepositoryPort, productCustomOrderFieldRepositoryPort);
+            verify(priceSourceMetricsPort).recordExcludedProducts("LEGACY_DRIFT", 1);
+            verifyNoMoreInteractions(priceSourceMetricsPort);
+            assertSingleSanitizedWarn(EXCLUDED_LOG.formatted(1, "{LEGACY_DRIFT=1}"));
+        }
+
         @Test
         @DisplayName("응답 SKU 가 투영에 없으면 그 상품도 해석 실패와 같게 뺀다")
         void excludesProductWhoseSkuIsNotInProjection() {

@@ -16,6 +16,7 @@ import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.Prod
 import com.commercefoundry.domainlayer.catalog.adapter.out.client.feign.dto.ProductSkuInternalResponse;
 import com.commercefoundry.domainlayer.catalog.adapter.out.client.support.ProductInternalResponseSupport;
 import com.commercefoundry.domainlayer.catalog.application.port.out.query.SkuQueryResult;
+import com.commercefoundry.domainlayer.order.application.command.OrderQuoteCommand;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.util.List;
 import java.util.stream.LongStream;
@@ -87,6 +88,21 @@ class ProductSkuClientAdapterTest {
         echoSkus();
 
         adapter.findSkus(LongStream.rangeClosed(1, ProductSkuClient.MAX_IDS_PER_CALL).boxed().toList());
+
+        verify(client, times(1)).getSkus(anyList());
+    }
+
+    /**
+     * 주문 한 건의 SKU 는 한 번에(product-service 의 한 읽기 시점으로) 조회된다 — 줄 상한이 호출당 상한 이하이기 때문이다.
+     * 둘 중 하나가 바뀌어 줄 상한이 더 커지면 한 주문의 SKU 가 서로 다른 시점의 두 응답으로 나뉜다.
+     */
+    @Test
+    @DisplayName("주문 줄 상한(OrderQuoteCommand.MAX_LINES)은 호출당 상한 이하라 주문 한 건의 SKU 조회는 한 번으로 끝난다")
+    void orderLineLimitFitsSingleCall() {
+        assertThat(OrderQuoteCommand.MAX_LINES).isLessThanOrEqualTo(ProductSkuClient.MAX_IDS_PER_CALL);
+        echoSkus();
+
+        adapter.findSkus(LongStream.rangeClosed(1, OrderQuoteCommand.MAX_LINES).boxed().toList());
 
         verify(client, times(1)).getSkus(anyList());
     }

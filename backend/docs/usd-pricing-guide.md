@@ -343,16 +343,22 @@ drift가 있어도 투영 자체는 실제 가격행을 선택하며, 별도 대
   담기는 `CART_002` 404 다.
 - `resolveEach` 는 묶음 구조 오류만 전체 예외로 두고 상품별 사유(`INVALID_LEGACY`·`INVALID_PRICE_BOOK`·`LEGACY_DRIFT`)를 결과로 돌려준다.
   `resolve`(상세)는 그 결과의 요청 순서상 첫 실패로 전체를 거절해 기존 의미 그대로다.
-- 운영자 알림: 원시 아이디·금액 없이 뺀 상품 수와 사유별 건수만 담은 WARN 한 줄, 그리고 카운터 `commerce.product.price-source.internal-sku.excluded`
+- 운영자 알림: 원시 아이디·금액 없이 그 요청에서 뺀 상품 수와 사유별 건수만 담은 WARN 한 줄, 그리고 카운터 `commerce.product.price-source.internal-sku.excluded`
   (태그 `reason` 하나 — 해석 사유 enum 이름 또는 `SKU_NOT_IN_PROJECTION`). 지표는 application 의 `PriceSourceMetricsPort` 와
   `adapter/out/observation/PriceSourceMetricsAdapter`(Micrometer, 레지스트리가 없거나 실패하면 무시) 로 둔다.
+  WARN·카운터는 **요청마다** 남는다 — 같은 상품이 장바구니 조회마다 다시 세어지므로 카운터 값은 고유 상품 수가 아니라 요청 × 상품 건수다(rate-limit 없음).
 - snapshot **읽기 자체**의 실패(`PriceSourceSnapshotReadException` — DB 오류·`ROW_LIMIT_EXCEEDED`·`CALLER_TRANSACTION_REQUIRED` 등)는 인프라 장애라
-  상품을 빼지 않고 메시지 고정·cause 없는 `IllegalStateException` → 500 `COMMON_000` 이다. 묶음을 포트 상한(50)보다 작은 20개로 잡는 이유는
-  상품당 SKU 상한 100(PRODUCT_095·SKU_ADMIN_102) × 20 = 2000 으로 SKU 행 상한을 넘지 않게 해, 정상 데이터에서 `ROW_LIMIT_EXCEEDED` 500 이 서킷 실패로 세어지지 않게 하려는 것이다.
+  상품을 빼지 않고 메시지 고정·cause 없는 `IllegalStateException` → 500 `COMMON_000` 이다. 묶음을 포트 상한(`PriceSourceSnapshotRepositoryPort.MAX_PRODUCTS` 50)보다 작은
+  20개로 잡는 이유는 상품당 SKU 상한 100(등록 PRODUCT_095·추가 SKU_ADMIN_010 `SkuAddProcessor.MAX_SKUS`) × 20 = 2000 으로 SKU 행 상한(`MAX_SKU_ROWS`)을 넘지 않게 해,
+  정상 데이터에서 `ROW_LIMIT_EXCEEDED` 500 이 서킷 실패로 세어지지 않게 하려는 것이다. 이 관계는 `SkuInternalSnapshotChunkLimitTest` 가 고정한다.
+- 한계: snapshot 은 요청하지 않은 형제 SKU 와 모든 통화의 가격행까지 도메인으로 매핑하므로, 그중 한 행이 도메인 불변식을 어겨 매핑이 실패하면 그 상품만 빠지지 않고
+  읽기 실패(`READ_FAILED`) 500 이 된다(서킷 실패로 셈). 해석 단계의 상품별 실패만 D8 제외 대상이다.
 - `LEGACY`(기본)는 snapshot·지표 포트를 부르지 않고 응답이 같다. `PriceSourceModeGuard` 의 PRICE_BOOK 기동 거절은 B7 까지 유지한다.
 - 시험: Processor 모드별 단위 시험(투영 가격·drift/가격행 누락/투영 밖 SKU/묶음 구조 오류의 제외와 순서 유지·사유별 지표·정제 로그·읽기 실패 500·51개 상품 20개 묶음·LEGACY 무호출),
   Resolver `resolveEach` 시험, 지표 어댑터 시험, H2/PostgreSQL 통합 시험(실제 `SkuInternalUseCase` 프록시로 drift 상품만 빠짐·카운터 1),
   order `OrderWebFacadeTest`(product 응답에서 빠진 SKU → `ORDER_003`, 기록·선점 없음, 서킷 실패 0).
+  묶음 상한 고정 시험(`SkuInternalSnapshotChunkLimitTest`)과 뺀 상품이 옵션 값·입력 항목 조회 인자에서도 빠지는 시험,
+  order `ProductSkuClientAdapterTest`(주문 줄 상한 `OrderQuoteCommand.MAX_LINES` 50 ≤ 호출당 상한 `ProductSkuClient.MAX_IDS_PER_CALL` 100 — 주문 한 건의 SKU 조회는 한 번·한 시점)도 둔다.
 
 B 후속은 모든 고객·internal·admin reader, 목록 정렬·페이지/count·SKU 집계·display/look과 다섯 가격 writer,
 전체 Product 저장 경로를 같은 단일 정본으로 연결하는 작업이다. 동시 읽기 일관성·양방향 writer 경합·실패 rollback·혼합 배포와
