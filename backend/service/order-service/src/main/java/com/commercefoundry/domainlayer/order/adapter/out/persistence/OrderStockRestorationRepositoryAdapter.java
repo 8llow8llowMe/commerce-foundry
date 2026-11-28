@@ -5,6 +5,7 @@ import com.commercefoundry.domainlayer.order.adapter.out.persistence.entity.Orde
 import com.commercefoundry.domainlayer.order.adapter.out.persistence.repository.OrderStockRestorationRepository;
 import com.commercefoundry.domainlayer.order.application.mapper.OrderStockRestorationMapper;
 import com.commercefoundry.domainlayer.order.application.port.out.OrderStockRestorationRepositoryPort;
+import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentRestorationObservationQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration.Status;
@@ -67,6 +68,13 @@ public class OrderStockRestorationRepositoryAdapter implements OrderStockRestora
     @Override
     public Optional<Instant> findOldestCreatedAt(Status status) {
         return Optional.ofNullable(orderStockRestorationRepository.findOldestCreatedAt(status));
+    }
+
+    @Override
+    public PaymentRestorationObservationQueryResult observe(Instant observedAt) {
+        OrderStockRestorationRepository.ObservationRow row = orderStockRestorationRepository.observe(Status.RESTORE_PENDING, Status.HELD, observedAt);
+        return new PaymentRestorationObservationQueryResult(row.getPendingCount(), row.getOldestPendingCreatedAt(), row.getHeldCount(),
+            row.getOldestHeldCreatedAt());
     }
 
     @Override

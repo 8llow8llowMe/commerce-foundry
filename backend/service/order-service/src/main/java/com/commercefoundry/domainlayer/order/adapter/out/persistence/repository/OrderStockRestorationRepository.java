@@ -51,6 +51,30 @@ public interface OrderStockRestorationRepository extends JpaRepository<OrderStoc
     @Query("select min(r.createdAt) from OrderStockRestorationEntity r where r.status = :status")
     Instant findOldestCreatedAt(OrderStockRestoration.Status status);
 
+    /**
+     * 운영 관측(#808) — 관측 시각까지 등록된 대기 · HELD 의 수와 가장 오래된 등록 시각을 한 문장으로 읽는다(같은 스냅숏). 행이 없으면 수는 0, 시각은 null.
+     */
+    @Query("""
+        select coalesce(sum(case when r.status = :pending then 1 else 0 end), 0) as pendingCount,
+               min(case when r.status = :pending then r.createdAt end) as oldestPendingCreatedAt,
+               coalesce(sum(case when r.status = :held then 1 else 0 end), 0) as heldCount,
+               min(case when r.status = :held then r.createdAt end) as oldestHeldCreatedAt
+        from OrderStockRestorationEntity r
+        where r.status in (:pending, :held) and r.createdAt <= :observedAt
+        """)
+    ObservationRow observe(OrderStockRestoration.Status pending, OrderStockRestoration.Status held, Instant observedAt);
+
+    /** {@link #observe} 결과 — 인터페이스 프로젝션. */
+    interface ObservationRow {
+        long getPendingCount();
+
+        Instant getOldestPendingCreatedAt();
+
+        long getHeldCount();
+
+        Instant getOldestHeldCreatedAt();
+    }
+
     /** 스윕 대상 — {@code idx_order_stock_restoration_status_next_attempt_at_id} 순서 그대로 읽는다. */
     List<OrderStockRestorationEntity> findByStatusAndNextAttemptAtLessThanEqualOrderByNextAttemptAtAscIdAsc(
         OrderStockRestoration.Status status, Instant now, Limit limit);

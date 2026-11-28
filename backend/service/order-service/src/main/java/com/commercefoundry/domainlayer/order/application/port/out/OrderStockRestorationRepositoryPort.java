@@ -1,5 +1,6 @@
 package com.commercefoundry.domainlayer.order.application.port.out;
 
+import com.commercefoundry.domainlayer.order.application.port.out.query.PaymentRestorationObservationQueryResult;
 import com.commercefoundry.domainlayer.order.domain.model.Order;
 import com.commercefoundry.domainlayer.order.domain.model.OrderStockRestoration;
 import java.time.Instant;
@@ -30,6 +31,9 @@ public interface OrderStockRestorationRepositoryPort {
 
     /** 상태별 가장 오래된 작업의 등록 시각 — 적체 경고. 없으면 빈 값. */
     Optional<Instant> findOldestCreatedAt(OrderStockRestoration.Status status);
+
+    /** 운영 관측(#808) — {@code observedAt} 까지 등록된 대기 · HELD 의 수와 가장 오래된 등록 시각을 한 스냅숏으로 읽는다. */
+    PaymentRestorationObservationQueryResult observe(Instant observedAt);
 
     void addConfirmationParticipant(long workId, long paymentId);
 
