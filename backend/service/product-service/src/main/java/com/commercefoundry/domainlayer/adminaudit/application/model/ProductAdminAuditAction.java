@@ -56,6 +56,10 @@ public enum ProductAdminAuditAction {
     SIZE_CHART_DRAFT_BATCH_CREATE,
     MEDIA_IMAGE_UPLOAD_ISSUE,
     MEDIA_IMAGE_UPLOAD_CONFIRM,
+    /** 전시 영상 업로드 발급 (#796). 대상 {@code media-upload:<UUID>} — 식별자가 없는 실패는 {@code -} */
+    MEDIA_VIDEO_UPLOAD_ISSUE,
+    /** 전시 영상 업로드 확정 (#796). 대상 {@code media-upload:<UUID>} — 키 형식이 틀린 실패는 {@code -} */
+    MEDIA_VIDEO_UPLOAD_CONFIRM,
 
     /** 메인 전시 섹션 생성 (#163 PR-C). 대상 {@code display-section:<id>} — 만들지 못했으면 {@code -} */
     DISPLAY_SECTION_CREATE,

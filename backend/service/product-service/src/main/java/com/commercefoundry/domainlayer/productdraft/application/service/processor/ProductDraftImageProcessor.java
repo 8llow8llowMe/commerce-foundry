@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  * (AI 요청 본문 32MB 를 base64 4/3 배로 나눈 값, {@code ai-provider-guide.md})을 저장 단계에서 먼저 알린다. 값은 product 안에 둔다(ai-core 에 합계 상수가 없다).
  *
  * <p><b>허용 키</b> — 업로드를 마친 상품 미디어 키 {@code products/media/{actorId}/{UUID}/{SHA-256}.{jpg|png|webp}} 만이다(D11, 모양은 미디어 업로드 확정
- * {@code MediaImageStorageAdapter} 가 만든다). 업로드 확정 전 원본({@code uploads/...}) · 상품별 키({@code products/{id}/...}) · 이관 이미지는 받지 않는다.
+ * {@code MediaStorageAdapter} 가 만든다 — 같은 prefix 의 영상 {@code .mp4}(#796)는 확장자로 거른다). 업로드 확정 전 원본({@code uploads/...}) · 상품별 키({@code products/{id}/...}) · 이관 이미지는 받지 않는다.
  * 상품별 키를 막는 것은 다른 상품 소속을 이 요청에서 확인할 수 없어서다 — 초안은 상품이 아직 없다.
  */
 @Component

@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "[어드민] 전시 이미지 업로드", description = "전시 · 룩 공용 JPEG · PNG · WebP 업로드")
+@Tag(name = "[어드민] 전시 이미지 업로드", description = "전시 · 룩 공용 JPEG · PNG · WebP 업로드. 전시 영상의 대표 사진(포스터)도 이 API로 올린다.")
 @SecurityRequirement(name = SwaggerSecurityConfigurer.BEARER_AUTH)
 @RestController
 @RequiredArgsConstructor

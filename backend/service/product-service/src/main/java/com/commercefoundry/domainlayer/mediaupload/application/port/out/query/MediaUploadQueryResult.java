@@ -3,8 +3,8 @@ package com.commercefoundry.domainlayer.mediaupload.application.port.out.query;
 import java.time.Instant;
 import java.util.Map;
 
-public final class MediaImageUploadQueryResult {
-    private MediaImageUploadQueryResult() {}
+public final class MediaUploadQueryResult {
+    private MediaUploadQueryResult() {}
 
     public record Ticket(String uploadKey, String uploadUrl, String method, Map<String, String> headers, Instant expiresAt) {
         public Ticket {

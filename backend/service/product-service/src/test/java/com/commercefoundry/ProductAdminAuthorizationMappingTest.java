@@ -86,6 +86,8 @@ class ProductAdminAuthorizationMappingTest {
         Map.entry("POST /api/v1/admin/displays/preview", AdminAuthority.CATALOG_MANAGE),
         Map.entry("POST /api/v1/admin/displays/image-uploads", AdminAuthority.CATALOG_MANAGE),
         Map.entry("POST /api/v1/admin/displays/image-uploads/{uploadKey}/confirm", AdminAuthority.CATALOG_MANAGE),
+        Map.entry("POST /api/v1/admin/displays/video-uploads", AdminAuthority.CATALOG_MANAGE),
+        Map.entry("POST /api/v1/admin/displays/video-uploads/{uploadKey}/confirm", AdminAuthority.CATALOG_MANAGE),
         // 룩
         Map.entry("GET /api/v1/admin/looks", AdminAuthority.CATALOG_READ),
         Map.entry("GET /api/v1/admin/looks/{lookId}", AdminAuthority.CATALOG_READ),

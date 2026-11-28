@@ -3,8 +3,9 @@ package com.commercefoundry.domainlayer.mediaupload.application.info;
 import java.time.Instant;
 import java.util.Map;
 
-public final class MediaImageUploadInfo {
-    private MediaImageUploadInfo() {}
+/** 이미지 · 영상 업로드 공용 Info. 서명 URL · 헤더 · 키 · 공개 URL 을 toString 에 싣지 않는다. */
+public final class MediaUploadInfo {
+    private MediaUploadInfo() {}
 
     public record Ticket(String uploadKey, String uploadUrl, String method, Map<String, String> headers, Instant expiresAt) {
         public Ticket {
