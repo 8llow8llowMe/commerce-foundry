@@ -57,15 +57,17 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
   "돈은 나갔는데 주문 · 재고가 남는" 상태가 된다. 닫혀 있으면 결제 후 상태의 취소는 접수 전에 503 `ORDER_035` 이고, 결제 전 취소와 이미 접수된 취소의 재요청(현재 상세 200)은 그대로다.
   고객 응답의 `cancelable`(주문 내역 · 상세)은 같은 판정 `OrderStatus#isCancelableByCustomer(allowWhileMaking, paidCancellationOpen)` 이다 — 결제 대기는 늘,
   결제 완료 · 상품 준비중은 게이트가 열렸을 때, 제작 중은 게이트 + 설정.
-- **결제 후 취소** (#16 PR-2, 같은 `POST .../cancellation`): 어드민 승인 단계 없이 자동이다. 접수(tx1: 주문 행 잠금 · 결제 완료 기록 대조 · 클레임 REQUESTED ·
-  `CANCEL_REQUESTED` · `CUSTOMER` 이력) → 트랜잭션 밖 환불 → 환불이 확정되면 `CANCELED` + `SERVICE` 이력(`CANCELLATION_REFUNDED`) → 재고 복원 순서다(§5).
-  응답은 그 시점 상세다 — 환불 확정이면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(200). 이미 취소 요청 · 취소 완료이고 취소 클레임이 있으면 다시 돌리지 않고
-  현재 상세 200 이다(더블 클릭 — 잠금 · 버전 · 결정적 키에서 진 쪽도 다시 읽어 같으면 200, 다시 판정할 수 없으면 409 `ORDER_025`). 결제 완료 기록(`order_payment` PAID)이
-  없으면 500 `ORDER_033`, 전체 취소액이 승인 금액과 다르면 500 `ORDER_034` 로 접수하지 않는다.
+- **결제 후 취소** (#16 PR-2, 같은 `POST .../cancellation`): 어드민 승인 단계 없이 자동이다. 접수(tx1: 주문 행 잠금 · 클레임 목록 · 결제 완료 기록 대조 · 클레임 REQUESTED ·
+  `CANCEL_REQUESTED` · `CUSTOMER` 이력) → 트랜잭션 밖 환불 → 환불이 확정되면 주문을 잠그고 취소 정리(`CANCELED` + `SERVICE` 이력 `CANCELLATION_REFUNDED`) → 재고 복원
+  순서다(§5). 전체 취소는 **남은 수량 전부를 취소하는 클레임**이다(#684 PR-2, §1-4) — 선행 부분 취소가 없으면 전 항목 · 전 수량 · 결제 총액으로 전과 같다.
+  응답은 그 시점 상세다 — 환불 확정이면 `CANCELED`, 미확정 · 거절이면 `CANCEL_REQUESTED`(200). 이미 취소 요청 · 취소 완료이고 전체 취소 클레임(결정적 키)이 있으면 다시 돌리지 않고
+  현재 상세 200 이다(더블 클릭 — 잠금 · 버전 · 결정적 키에서 진 쪽도 다시 읽어 같으면 200, 다시 판정할 수 없으면 409 `ORDER_025`). 부분 취소만 열려 있는 취소 요청이면
+  전체 취소를 받지 않는다(409 `ORDER_020`). 결제 완료 기록(`order_payment` PAID)이 없으면 500 `ORDER_033`, **정산된 취소 환불 합 + 이번 환불**이 승인 금액과 다르거나
+  클레임 데이터 이상(결제 완료 주문의 열린 취소 · 수량 초과)이면 500 `ORDER_034` 로 접수하지 않는다.
   환불 거절 주문은 `CANCEL_REQUESTED` 로 남고 출고하지 않는다. 출구는 운영자 수동 환불 확정 · 재시도(#17 A1 · §5)와 **결제 후 취소 거절**(#17 A4)이다.
   취소 거절은 payment 무환불 판정이 `NO_REFUND_CONFIRMED` 일 때만 `Order#rejectCancellation` 으로 상태 이력의 직전 상태(결제 완료 · 제작 중 · 상품 준비중)로 돌린다
   — 돈이 나갔을 수 있으면(결과 미확인 `REFUND_UNCONFIRMED` 포함) 돌아가는 길은 없다. 표의 `CANCEL_REQUESTED → PAID` 중 부분 취소 정리(`Order#settleCancellation`)는
-  **환불이 확정된 뒤**의 정리다(§1-4). 거절 API · 조건 · 순서는 PR-2 에서 이 문서에 적는다.
+  **환불이 확정된 뒤**의 정리다(§1-4). 거절 API · 조건 · 순서는 #17 A4 PR-2 에서 이 문서에 적는다.
 - **결제 전 취소** (`Order#cancelBeforePayment`): 상태 · `CUSTOMER` 이력(사유 = 취소 사유 코드) · `order-canceled` outbox 를 한 트랜잭션으로 쓴다(§3-5).
   이미 취소됐으면 아무것도 쓰지 않고 성공이다. 읽은 뒤 결제 완료 · 만료가 먼저 커밋하면 `@Version` 비교로 롤백하고 다시 읽는다 — 취소 완료면 200,
   결제 완료 · 상품 준비중 · 제작 중이면 결제 후 취소로 넘기고(#16 PR-2), 그 밖(만료 등)은 409 `ORDER_020` 이다.
@@ -115,7 +117,9 @@ RETURN_REQUESTED ──▶ DELIVERED (반품 정리 — 열린 반품 없이 일
 - **반품 상태를 바꾸는 트랜잭션은 주문 행을 먼저 잠근다 (#17 B2a)** — 고객 반품 접수(`findByIdAndMemberIdForUpdate`)와 같게, 반품 환불 기록(B2a) · 승인 · 거절(B2c) ·
   반품 수동 확정(B2b)은 `OrderRepositoryPort#findByIdForUpdate(orderId)`(NOWAIT)로 주문을 잡은 뒤 클레임 목록을 읽고 바꾼다. 클레임 행마다의 `@Version` 만으로는
   write skew 를 못 막는다 — "열린 반품이 없는데 `RETURN_REQUESTED` 에 멈춘 주문", "열린 `REQUESTED` 반품이 있는데 `DELIVERED` 로 돌아간 주문"이 생긴다.
-  잠금에서 지면 기다리지 않고 잠금 예외다(반품 환불 기록은 503 `ORDER_036` → 같은 클레임 재전송, §5 B2a). 결제 후 취소 경로의 낙관적 방식은 그대로다.
+  잠금에서 지면 기다리지 않고 잠금 예외다(반품 환불 기록은 503 `ORDER_036` → 같은 클레임 재전송, §5 B2a).
+  **결제 후 취소도 같다(#684 PR-2)** — 한 주문에 취소 클레임이 여럿일 수 있어 환불 기록(tx2) · 수동 환불 확정이 주문을 먼저 NOWAIT 으로 잠근 뒤 클레임 목록으로 정리를
+  판정한다. 접수(tx1)는 원래 주문 잠금이다. tx2 가 잠금에서 지면 503 `ORDER_036`(클레임은 lease 로 남아 스케줄러가 같은 클레임으로 다시 보낸다)이고, 수동 확정은 409 `ORDER_037` 이다.
 - 같은 결제 승인 이벤트는 다시 올 수 있다(릴레이 재발행 · 컨슈머 재전달) — inbox(`orders.processed_event`)가 같은 eventId 를 거르고, 다른 eventId 의 같은 결제는
   `order_payment.payment_id` 유니크가 막는다. 이미 그 결제로 `PAID` 이후 상태면 아무것도 바꾸지 않는다. 재전송 스케줄러는 없다(`payment-guide.md` §6).
 
@@ -141,10 +145,10 @@ PR 분할과 이 절의 범위:
 
 | PR | 범위 | 상태 |
 |----|------|------|
-| PR-1 | 도메인 · 저장 기반 — 아래 상태 모델 · 산식 · 정리 판정 · 취소 수량 합 질의. **부르는 곳이 없다** | 이 PR |
-| PR-2 | 취소 엔진 일반화 — 부분 취소 뒤 전체 취소는 남은 금액만 환불, 클레임 아이디 재조회, tx2 가 `completeCancellation` 대신 정리 판정 → `settleCancellation`, 어드민 수동 확정 · 복원 생략 종결의 `PAID` 복귀 | 남음 |
+| PR-1 | 도메인 · 저장 기반 — 아래 상태 모델 · 산식 · 정리 판정 · 취소 수량 합 질의 | 완료 |
+| PR-2 | 취소 엔진 일반화 — 부분 취소 뒤 전체 취소는 남은 금액만 환불, 클레임 아이디 재조회, tx2 가 `completeCancellation` 대신 정리 판정 → `settleCancellation`, 어드민 수동 확정 · 복원 생략 종결의 `PAID` 복귀(아래 "취소 엔진") | 이 PR |
 | PR-3 | 하류 수량 보정 — 반품 산식 · 반품 가능 수량(주문 − 취소 − 반품) · 피킹 스냅숏 잔여 수량 · 어드민 상세 `canceledQuantity`. **PR-4 보다 먼저 머지한다**(뒤집히면 초과 출고) | 남음 |
-| PR-4 | 고객 API `POST /api/v1/orders/{orderId}/partial-cancellations` · `.../quotes`, 플래그 `order.cancellation.partial-enabled`(기본 false), 오류 `ORDER_047`~`051`, 주문 상세 칸. **PR-2 · PR-3 뒤에 머지한다** — 기존 전체 취소 엔진은 총액 환불 · 결정적 키 재조회 · `completeCancellation` 이라 그 전에 부분 취소가 들어오면 돈 · 주문 · 재고가 갈라진다. 플래그 기본값만으로 막지 않는다 | 남음 |
+| PR-4 | 고객 API `POST /api/v1/orders/{orderId}/partial-cancellations` · `.../quotes`, 플래그 `order.cancellation.partial-enabled`(기본 false), 오류 `ORDER_047`~`051`, 주문 상세 칸. **PR-2 · PR-3 뒤에 머지한다** — PR-2 전의 전체 취소 엔진은 총액 환불 · 결정적 키 재조회 · 무판정 취소 완료라 그 위에 부분 취소가 들어오면 돈 · 주문 · 재고가 갈라진다. 플래그 기본값만으로 막지 않는다 | 남음 |
 
 **상태 모델**
 
@@ -157,13 +161,16 @@ PR 분할과 이 절의 범위:
 - `CANCEL_REQUESTED → PAID` 는 `settleCancellation` 만 한다. `changeStatus(PAID)` 는 도메인이 거절하고, 어드민 직접 전이 표(`AdminStatusChangePolicy`)에도 없어
   PATCH 는 `ORDER_023` 이다(전에는 표 밖이라 `ORDER_020`). 이미 목표 상태면 바꾸지 않은 값을 돌려준다 — 확정 반영 재시도가 안전하다.
   단 `PAID` 는 끝 상태가 아니다 — 정리 뒤 운영자가 상품 준비중으로 넘긴 주문에 같은 클레임의 복원 재시도 · 수동 확정이 정리를 다시 부르면 전이 예외다.
-  PR-2 는 정리를 **환불이 기록되는 전이**(환불 대기 · 환불 실패 → 환불 완료)에서만 부르고, 복원 단계(환불 완료 → 완료)에서는 부르지 않는다.
+  그래서 정리는 **환불이 기록되는 전이**(환불 대기 · 환불 실패 → 환불 완료 — 자동 환불 확정 반영 · 수동 환불 확정)에서만 부르고, 복원 단계(환불 완료 → 완료 ·
+  복원 실패 → 환불 완료 다시 시도 · 복원 생략 종결)에서는 부르지 않는다.
 - `outcome` 은 데이터 이상을 판정하지 않고 `IllegalStateException` 을 던진다 — 취소에 잡힌 수량이 주문 수량을 넘음, 주문에 없는 항목, 열린 취소도 환불이 기록된
   취소도 없음(전부 거절은 취소 거절 전이 A4 몫이라 원래 상태를 알 수 없다). 다른 주문의 클레임은 `IllegalArgumentException` 이다.
-  부르는 쪽(PR-2)은 반품 정리(§5 B2c-2 "fail-closed")와 같게 한다 — 예외로 tx2 를 통째로 되돌리지 않는다(환불은 이미 나갔다). 환불 기록은 남기고 클레임을
-  `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`)로, 주문은 `CANCEL_REQUESTED` 에 둔다.
+  자동 반영은 반품 정리(§5 B2a · B2c-2 "fail-closed")와 같게 한다 — 예외로 tx2 를 통째로 되돌리지 않는다(환불은 이미 나갔다). 환불 기록은 남기고 클레임을
+  `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`)로, 주문은 그대로(`CANCEL_REQUESTED`) 둔다. 정리 전이 예외(예: 취소 완료 주문에 일부 수량 정리)도 같다.
+  운영자 수동 확정은 운영자 앞이라 저장하지 않고 409 `ORDER_041` 이다.
 - 판정 입력은 **주문 잠금 뒤 읽은 클레임 목록에 이번 클레임의 갱신 결과(환불 완료)를 바꿔 넣은 것**이다. 갱신 전 목록으로 판정하면 이번 클레임이 열린 취소로 보여
-  `STILL_REQUESTED` 가 나오고, 열린 취소 없이 `CANCEL_REQUESTED` 에 멈춘 주문(남은 수량을 출고하지 못함)이 생긴다.
+  `STILL_REQUESTED` 가 나오고, 열린 취소 없이 `CANCEL_REQUESTED` 에 멈춘 주문(남은 수량을 출고하지 못함)이 생긴다. 바꿔 넣기는 정책 오버로드
+  `CancellationRefundPolicy#outcome(order, stored, recorded)`(목록에서 이번 클레임을 빼고 갱신 결과를 넣는다) 한 곳이 한다 — 부르는 쪽이 빠뜨릴 수 없게.
 - 부분 취소 접수는 `PAID` 만 받는다(`OrderStatus#acceptsPartialCancellation`, 사용자 결정 Q1). 상품 준비중은 피킹 묶음이 수량을 스냅숏하고, 제작 중은 전체 취소만 받는다.
 
 **항목 수량**
@@ -190,11 +197,40 @@ PR 분할과 이 절의 범위:
 - 부분 취소를 순서대로 다 하면 환불 합은 결제 총액과 같다(망원 합). 소액 항목 취소로 재부과가 취소 금액 이상이면 0 이하다 — `isPayable()` 이 false 이고 접수하지 않는다
   (PR-4 409 `ORDER_050`, 사용자 결정 Q2). 0 으로 깎거나 추가 결제를 받지 않는다.
 
+**취소 엔진 (PR-2)** — `OrderCancellationProcessor` · `OrderCancellationPipelineProcessor` · `ClaimAdminRecoveryProcessor`. 새 오류 코드 · DDL 은 없다.
+
+- **전체 취소 = 남은 수량 전부** — 접수(tx1)가 주문 잠금 뒤 이 주문의 클레임 목록을 읽어 `CancellationRefundPolicy#remaining` 으로 거절 밖 취소에 잡히지 않은 수량 전부 ·
+  환불액 `due(before)` · 정산된 취소 환불 합을 낸다. 키는 그대로 결정적 전체 취소 키다(주문당 하나 — 남은 수량 전부라 그 뒤 결제 완료로 돌아가지 않는다).
+  결제 대조(`ORDER_034`)는 `정산된 취소 환불 합 + 이번 환불 = 승인 금액`이다(망원 합). 결제 완료 주문에 열린 취소가 있거나 수량 초과 · 남은 수량 없음이면
+  데이터 이상으로 `ORDER_034` 다. 예: A 40,000 · B 10,000 × 2(무료배송, 결제 60,000)에서 A 부분 취소 37,000(B 20,000 이 기준 아래라 배송비 3,000 재부과) 뒤
+  전체 취소는 B × 2 · 23,000 이고, 재고는 그 클레임 항목(B × 2)만 복원한다(claimId 멱등).
+- **환불 확정 반영(tx2)** — 주문 NOWAIT 잠금 → `markConfirmedRefund` → 판정 입력(위) → `outcome` → `settleCancellation` → 바뀌었으면 `SERVICE` 이력
+  (`OrderStatusHistory#cancellationSettled` — 전량 `CANCELLATION_REFUNDED`, 일부 `PARTIAL_CANCELLATION_REFUNDED`). 주문이 취소 요청 · 취소 완료가 아니거나 정리가 불가능하면
+  fail-closed(위). 운영자 로그는 클레임 저장이 이긴 뒤에만 남긴다 — 낡은 클레임으로 온 늦은 반영은 버전 대조에서 지고 로그 없이 재조회로 멈춘다.
+  무판정 취소 완료 전이(`Order#completeCancellation`)와 그 이력(`cancellationRefunded`)은 없앴다 — 결제 후 취소의 취소 완료 · 결제 완료 복귀는 `settleCancellation` 만 한다.
+- **재조회 · 실패 횟수는 클레임 아이디** — 2-CAS 의 재조회(`findClaimById`)와 `recordAttemptFailure` 가 두 유형 모두 클레임 아이디로 읽는다(전에는 취소만 주문의 결정적 키).
+  payment 의 환불 멱등 키도 claimId 라 같은 클레임 재전송은 PG 없이 200 이고, 이미 정리된 클레임의 늦은 재전송은 저장 버전에서 져 정리 · 복원을 다시 하지 않는다.
+  잠금 TX(2-CAS 소진 뒤)의 잠금 순서는 취소가 A2a 그대로 클레임 → 주문, 반품이 주문 → 클레임이다(둘 다 NOWAIT 라 교착 없이 진 쪽이 잠금 예외).
+- **운영자 수습** — 수동 환불 확정은 취소도 주문을 먼저 잠그고 같은 정리를 한다(부분 취소면 결제 완료 복귀 + `ADMIN` 이력 · 사유). 주문 다음에 클레임을 NOWAIT 으로
+  잠가 다시 읽고 화면 버전을 다시 대조한다(주문 → 클레임, 다르거나 잠금에서 지면 409 `ORDER_037`). 복원 생략 종결은 주문 전 항목 ·
+  전 수량을 담은 취소만 주문 취소 완료를 요구하고, 일부 수량 취소는 반품처럼 주문 상태를 보지 않는다(§5 표).
+- **동작 변화** — tx2 가 주문을 잠그므로 같은 주문의 다른 짧은 잠금(고객 더블 클릭의 tx1 등)과 겹칠 수 있다. 잠금에서 지면 파이프라인이 클레임 아이디로 다시 읽어
+  다른 쪽이 이 환불을 이미 기록했으면 이미 반영된 경우처럼 조용히 끝내고(복원은 그쪽이 잇는다), 기록되지 않았으면 503 `ORDER_036` 이다 — 클레임은 lease 로 남아
+  스케줄러가 같은 클레임으로 잇는다(반품 B2a 와 같다). 선행 부분 취소가 없는 주문의 값 · 키 · 이력은 전과 같다.
+- 시험 — `OrderCancellationEngineTest`(가짜 저장소로 실제 Processor · 파이프라인: 부분 뒤 전체 취소의 남은 금액 · 남은 수량 복원 · 취소 완료, 접수 순서, `ORDER_034`
+  합 불일치 · 열린 취소, 부분 정리 `PAID` · 이력, 판정 입력 바꿔 넣기, fail-closed 2종, 미확정 재시도 · 클레임 아이디 재조회 · 재전송 멱등 · 실패 횟수, 정리 뒤 상품 준비중의
+  복원 재시도 · 운영자 다시 시도, 수동 확정 `PAID` · 취소 완료 · 409, 일부 수량 종결), `CancellationRemainderPolicyTest`, `ClaimAdminRecoveryPolicyPartialCancellationTest`.
+  기존 취소 시험은 스텁만 바꿨다(주문 조회 → 주문 잠금, 결정적 키 재조회 → 클레임 아이디). 부분 취소 접수(PR-4)의 DB 동시성 계약 시험은 PR-4 에서 한다.
+
 **알려진 한계**
 
 - 취소 클레임의 `PAYMENT_016`(겹침)은 지금 거절로 분류된다. 앞 부분 취소를 수동 확정해 payment 원장이 PENDING 으로 남은 드문 경우다 — #693 order 2단계와 함께 정한다.
+  "결제 후 취소는 주문당 하나라 겹침이 없다"(`Claim#isRefundWaiting` 의 옛 전제)는 한 주문에 취소가 여럿이면 맞지 않는다. **PR-4 머지 조건: 취소의 `PAYMENT_016` 도
+  반품처럼 대기(막힘 — 다시 시도가 정본 경로)로 본다**(#17 B2b 와 같게, 중추 결정 2026-11-29 — 환불 없이 `CANCELED` 가 되는 경로를 막는다. PR-2 는 동작을 바꾸지 않았다).
 - 취소 거절(A4)은 도메인 전이(`Claim#rejectCancellation` · `Order#rejectCancellation`)와 payment 무환불 판정 호출 포트까지만 있고 어드민 API 가 아직 없다(#17 A4 PR-2).
   그때까지 결제사가 종결 거절하면 출구는 수동 환불 확정뿐이다.
+- **PR-4 머지 조건: 데이터 이상(`RESTORATION_FAILED(ORDER_STATUS_UNEXPECTED)`)으로 `CANCEL_REQUESTED` 에 갇힌 부분 취소는 ERROR 로그 + 지표로 경보한다**
+  — 수습 절차는 #695 다.
 - PR-3 전까지 `ReturnRefundPolicy` 는 거절이 아닌 취소 클레임이 있으면 예외를 던진다. 고객 부분 취소 API(PR-4) 전이라 운영 동작에는 영향이 없다.
 
 ## 2. 주문 금액
@@ -1049,8 +1085,9 @@ DB 불가 중 주문 기록의 즉시 보존·자동 무손실 복구를 보장�
 
 `ClaimAdminRecoveryPolicy`는 상태를 바꾸지 않는 신규 실행 자격 검사다. 저장된 취소만 대상으로 활성 lease(`next_attempt_at > now`)와
 `ORDER_STATUS_UNEXPECTED` 재시도를 막는다. 환불 수동 확정 대상은 같은 저장 주문이 `CANCEL_REQUESTED` · `CANCELED` 인 `REFUND_FAILED` 중 결제사 거절이거나,
-다시 시도가 결제 취소 키 기한으로 닫힌 결과 미확인(`REFUND_UNCONFIRMED`)뿐이다(#17 A3). 수동 종결 대상은 같은 저장 주문이 `CANCELED`이고
-클레임이 `RESTORATION_FAILED`이며 코드가 `PRODUCT_027/028/029/003`, `RESTORATION_DATA_INVALID` 중 하나일 때뿐이다.
+다시 시도가 결제 취소 키 기한으로 닫힌 결과 미확인(`REFUND_UNCONFIRMED`)뿐이다(#17 A3). 수동 종결 대상은 클레임이 `RESTORATION_FAILED`이며 코드가
+`PRODUCT_027/028/029/003`, `RESTORATION_DATA_INVALID` 중 하나이고, 주문 전 항목 · 전 수량을 담은 취소면 같은 저장 주문이 `CANCELED`일 때뿐이다
+(일부 수량 취소는 주문 상태를 보지 않는다 — #684 PR-2, 아래 표).
 `RESTORATION_UNCONFIRMED`·알 수 없는 코드는 수동 종결할 수 없다. `ORDER_STATUS_UNEXPECTED` 도 종결 후보에서 뺐다(#17 A3) — 주문이 `CANCELED` 로 갈 경로가 없어
 버튼만 보이고 늘 409 였다. 그 건의 수습 경로는 #695 다. `PAYMENT_016/017/019`만으로 무환불을 확정하거나 거절을 허용하지 않는다.
 정책은 이미 처리됨의 멱등 성공 판정기가 아니므로 `COMPLETED`도 신규 실행 자격이 없다.
@@ -1131,16 +1168,17 @@ B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지
   - 클레임에 **"재고 복원 대기"** 를 두고, 복원이 실패하면 스케줄러가 같은 claimId · 같은 본문으로 다시 보낸다 (클레임 쪽 영속 재전송이다 — 결제 반영은 재전송 대신 이벤트 재전달 · DLT, `payment-guide.md` §6).
   - 복원을 부른 클레임은 **철회하지 않는다** — `REFUND_FAILED` 면 환불만 재시도한다. 복원을 되돌리는 API 는 없다. 상세는 §3-4.
 - **결제 후 고객 전체 취소 클레임** (#16 PR-2, 유형 `CANCELLATION`) — 주문당 하나(결정적 `request_key = UUID.nameUUIDFromBytes("cancellation:" + orderId)`, `uk_claim_order_id_request_key`),
-  항목은 주문 전 항목 · 전 수량, 환불액은 `CancellationRefundPolicy` 전체 취소액(배송비 포함 총액), `payment_id` 는 `order_payment` 결제 완료 기록의 결제다.
+  항목은 남은 수량 전부(선행 부분 취소가 없으면 주문 전 항목 · 전 수량), 환불액은 `CancellationRefundPolicy#remaining` 의 `due(before)`(선행 부분 취소가 없으면 배송비 포함
+  총액), `payment_id` 는 `order_payment` 결제 완료 기록의 결제다(#684 PR-2, §1-4 "취소 엔진"). 부분 취소 클레임(#684 PR-4)도 아래 상태 · 전이를 같이 쓴다.
   **환불 먼저 → 재고 복원** 순서다 — 복원은 되돌릴 수 없으므로 환불이 종결 거절되면 복원하지 않는다.
 
   | 클레임 상태 | 뜻 | 다음 |
   |-------------|----|------|
-  | `REQUESTED` | 환불 대기 | 환불 200 → `REFUNDED`(+ 주문 `CANCELED`), 종결 거절 → `REFUND_FAILED`(원격 코드), 미확정 → 백오프 재시도. 환불 200 인데 주문이 취소 요청 · 취소 완료가 아니면(데이터 이상) 복원 없이 `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`) |
+  | `REQUESTED` | 환불 대기 | 환불 200 → `REFUNDED`(+ 주문 잠금 뒤 취소 정리 — 전량 `CANCELED`, 일부 `PAID`, §1-4), 종결 거절 → `REFUND_FAILED`(원격 코드), 미확정 → 백오프 재시도. 환불 200 인데 주문이 취소 요청 · 취소 완료가 아니거나 정리 판정이 불가능하면(데이터 이상) 복원 없이 `RESTORATION_FAILED`(`ORDER_STATUS_UNEXPECTED`) — 환불 기록은 남고 주문은 그대로 |
   | `REFUNDED` | 환불 확정, 재고 복원 대기 | 복원 200 → `COMPLETED`, 종결 409 → `RESTORATION_FAILED`(`PRODUCT_027/028/029/003` — 원격 코드, 환불의 `PAYMENT_*` 와 같은 방식), 클레임 항목이 주문 스냅숏과 안 맞으면 `RESTORATION_DATA_INVALID`, 그 밖 → 백오프 재시도 |
   | `COMPLETED` | 끝 | — |
-  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다. 어드민 다시 시도(#17 A2b, 기한 안의 `REFUND_UNCONFIRMED` 만) → `REQUESTED`. 대표의 수동 환불 확정(#17 A3, 결제사 거절 · 기한이 지난 `REFUND_UNCONFIRMED`) → `REFUNDED`(+ 주문 `CANCELED`, PG 호출 없음) |
-  | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 `CANCELED`(`ORDER_STATUS_UNEXPECTED` 면 그 상태 그대로) | 어드민 다시 시도(#17 A2b) → `REFUNDED`. `ORDER_STATUS_UNEXPECTED` 는 다시 시도 · 종결하지 않는다(수습 경로는 #695). 대표의 복원 생략 종결(#17 A3, 확정 실패 코드 + 주문 `CANCELED`) → `COMPLETED` |
+  | `REFUND_FAILED` | 운영자 확인(#17) — 주문은 `CANCEL_REQUESTED` 그대로 | 같은 원 claim/payment/금액·통화의 확정 환불 성공은 실패 코드보다 우선하여 `REFUNDED`로 반영한다. 두 CAS 소진 뒤에는 A2a 행 잠금 경계를 사용하며, 이미 환불 이후 단계면 복원에 재진입하지 않는다. 어드민 다시 시도(#17 A2b, 기한 안의 `REFUND_UNCONFIRMED` 만) → `REQUESTED`. 대표의 수동 환불 확정(#17 A3, 결제사 거절 · 기한이 지난 `REFUND_UNCONFIRMED`) → `REFUNDED`(+ 주문 잠금 뒤 취소 정리 — 전량 `CANCELED`, 일부 `PAID`, PG 호출 없음) |
+  | `RESTORATION_FAILED` | 운영자 재고 확인(#86) — 주문은 정리된 상태(전량 `CANCELED`, 일부 수량이면 `PAID` 로 돌아간 뒤 진행 중인 상태. `ORDER_STATUS_UNEXPECTED` 면 정리 전 그대로) | 어드민 다시 시도(#17 A2b) → `REFUNDED`(정리를 다시 부르지 않는다). `ORDER_STATUS_UNEXPECTED` 는 다시 시도 · 종결하지 않는다(수습 경로는 #695). 대표의 복원 생략 종결(#17 A3, 확정 실패 코드 + 주문 전 수량 취소면 주문 `CANCELED`, 일부 수량 취소는 주문 상태 무관) → `COMPLETED` |
 
   - **종결 실패 수습** — 종결 실패를 저장할 때마다 클레임 · 주문 · 결제 아이디 · 실패 코드를 error 로그로 남기고(금액 제외), 운영자는 어드민 클레임 목록
     (`GET /api/v1/admin/claims?status=`)으로 `REFUND_FAILED` · `RESTORATION_FAILED` 를 매일 확인한다. 상세의 `recovery.situation` 이 업무 언어로 원인을 보인다.
@@ -1160,13 +1198,15 @@ B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지
     확인한 `REFUND_FAILED` 를 `ClaimAdminRecoveryProcessor.confirmRefund` 가 한 트랜잭션에서 바꾼다 — 화면 버전 대조 → 주문 조회 →
     `ClaimAdminRecoveryPolicy.requireRefundConfirmation(claim, order, refundRetryClosed)`(같은 저장 주문 · 주문 `CANCEL_REQUESTED`|`CANCELED` · 결제사 거절이거나
     다시 시도가 기한으로 닫힌 결과 미확인 — 기한 판정은 다시 시도의 038 과 같은 `isRefundRetryClosed`) → `Claim#confirmRefundByAdmin`(→ `REFUNDED`, 횟수 0,
-    다음 시각 `now + lease`, 실패 코드는 비우고 직전 실패 코드 · 사유 · 결정자 · 시각은 `decision` 칸에) → 주문이 `CANCEL_REQUESTED` 면 `Order#completeCancellation`
-    (허용 전이 표 그대로) + `ADMIN` 이력(사유), 이미 `CANCELED` 면 클레임만. 자격이 없으면 저장 전에 409 `ORDER_041` 이다. Processor 의 저장 분기는 자동 환불 확정 반영
-    `OrderCancellationProcessor#applyRefunded` 와 같다(이력만 `SERVICE` 대신 `ADMIN` · 사유). 클레임 · 주문 저장은 한 트랜잭션이라 주문 저장이 낙관락에서 지면
+    다음 시각 `now + lease`, 실패 코드는 비우고 직전 실패 코드 · 사유 · 결정자 · 시각은 `decision` 칸에) → 취소 정리(#684 PR-2 — 클레임만으로 후보면 주문을 NOWAIT
+    으로 먼저 잠그고(지면 409 `ORDER_037`), 잠금 뒤 클레임 목록에 확정 결과를 바꿔 넣어 `outcome` → `settleCancellation`: 전량이면 `CANCELED`, 일부 수량이면 `PAID` 복귀,
+    이미 `CANCELED` 면 클레임만) + 바뀌었으면 `ADMIN` 이력(사유). 자격이 없거나 정리 판정이 불가능하면 저장 전에 409 `ORDER_041` 이다. 정리는 자동 환불 확정 반영
+    `OrderCancellationProcessor#applyCancellationRefunded` 와 같다(이력만 `SERVICE` 대신 `ADMIN` · 사유). 클레임 · 주문 저장은 한 트랜잭션이라 주문 저장이 낙관락에서 지면
     클레임 확정 · 결정도 함께 롤백된다(`ClaimAdminDecisionWebIntegrationTest`). PG 는 부르지 않는다. 커밋 뒤 Facade 가 트랜잭션 밖에서 다시 시도와 같은
     `progress` 로 재고 복원을 잇고, 끊기면 미확정 한 번으로 세 스케줄러에 넘긴다 — 그래서 스케줄러가 꺼져 있으면 503 `ORDER_040` 이다.
   - **복원 생략 종결 (#17 A3, `POST /api/v1/admin/claims/{claimId}/completion`, `SETTLEMENT_MANAGE`)** — `ClaimAdminRecoveryPolicy.requireCompletion`(A1 자격 —
-    같은 저장 주문 `CANCELED` + `RESTORATION_FAILED` + 확정 실패 코드)을 통과한 클레임만 `Claim#completeByAdmin` 으로 `COMPLETED` 로 닫는다. 재고는 운영자가
+    `RESTORATION_FAILED` + 확정 실패 코드, 주문 전 항목 · 전 수량 취소면 같은 저장 주문 `CANCELED`. 일부 수량 취소(#684)는 정리 뒤 주문이 `PAID` 로 돌아가 상품 준비중 ·
+    배송 · 다음 취소로 넘어갈 수 있어 주문 상태를 보지 않는다)을 통과한 클레임만 `Claim#completeByAdmin` 으로 `COMPLETED` 로 닫는다. 재고는 운영자가
     재고 조정으로 먼저 맞춘다 — 그 전에 product 의 복원 기록을 확인한다(`PRODUCT_029` 는 같은 선점에 다른 복원 기록이 이미 있다는 뜻이라 재고가 돌아갔을 수 있다).
     원격 · 주문 변경이 없다. `RESTORATION_UNCONFIRMED` 는 실제로 복원됐을 수 있어 종결하지 않는다(다시 시도로 확인). `ORDER_STATUS_UNEXPECTED` 는 후보가 아니다(#695).
   - **상세 버튼 (#17 A3)** — `retryable` · `refundConfirmable` · `completable` 은 모두 `ClaimAdminRecoveryProcessor`(`isRetryable` · `isRefundConfirmable` ·
@@ -1178,11 +1218,12 @@ B2 가 쓴 행을 B1 이 읽을 수 있어 B2 → B1 롤백 때 매퍼가 깨지
     (헤더 멱등 키 없음). 감사는 `CLAIM_REFUND_CONFIRM` · `CLAIM_COMPLETE` 한 줄(성공 · 거절 모두, 사유 원문 제외)이다.
   - **A3 한계** — 수동 확정은 payment-service 에 알리지 않는다 — 결제 쪽 `payment_cancel` 은 `REJECTED` · `PENDING`, `payment` 는 `DONE` 그대로라 order `REFUNDED` 와
     장부가 갈라진다(운영 규칙 · 대사 기준은 `payment-guide.md` §8 "order 의 수동 환불 확정과 결제 장부", 정합은 #693). 클레임 결정 칸은 **마지막 결정만 남는다** —
-    확정 뒤 종결하면 확정 사유 · 결정자는 덮인다. 남는 것은 감사 로그(행위 · 관리자 · 시각, 사유 제외)와 주문 이력(확정이 주문을 취소 완료로 바꾼 경우의 사유)뿐이다.
+    확정 뒤 종결하면 확정 사유 · 결정자는 덮인다. 남는 것은 감사 로그(행위 · 관리자 · 시각, 사유 제외)와 주문 이력(확정이 주문 상태를 바꾼 경우 — 취소 완료 · 결제 완료 복귀 — 의 사유)뿐이다.
     결정 누적 원장은 후속 #694 다.
 
   - **트랜잭션 경계** — 접수(tx1) · 환불 결과 반영(tx2) · 복원 결과 반영(tx3)은 각각 짧은 트랜잭션이고 환불 · 복원 호출은 그 사이 트랜잭션 밖이다
     (`OrderCancellationProcessor` · `OrderCancellationPipelineProcessor`). 각 반영은 클레임 · 주문 `@Version` 으로 진 쪽을 가려 조용히 멈춘다(다른 워커가 처리).
+    tx2 의 환불 확정은 주문을 먼저 NOWAIT 으로 잠근다(#684 PR-2, §1-2) — 잠금에서 지면 503 `ORDER_036` 이고 같은 클레임으로 다시 보낸다. tx3 은 주문을 보지 않는다.
     tx1 뒤 끊기면 클레임이 남아 재시도가 잇고, 원격 200 뒤 반영이 실패해도 같은 클레임으로 다시 부르면 payment · product 가 멱등 200 을 준다.
   - **재시도 · lease** — `attempt_count`(단계별, 환불 확정 때 0 으로) · `next_attempt_at`(대기 상태에만) · `failure_code`(종결 실패에만). 접수 · 환불 확정은
     `next_attempt_at = now + lease`(`order.cancellation.retry.lease`, 기본 2분)로 두어 요청이 직접 잇는 동안 스케줄러가 겹쳐 집지 않는다. 미확정이면
@@ -1207,9 +1248,9 @@ B2c-2 라 그 전까지 호출부는 스케줄러뿐이고 실제로 도는 행�
 | 분기 | 취소 | 반품 |
 |------|------|------|
 | 환불 대기 (`Claim#isAwaitingRefund` · `awaitingRefundStatus`) | `REQUESTED` | `APPROVED` — 승인 전 `REQUESTED` 반품이 파이프라인에 들어오면 아무것도 하지 않는다 |
-| 재조회(2-CAS 의 두 번째 · 실패 횟수 세기) | 주문의 취소 클레임(`findClaim(orderId)`, 기존 그대로) | 클레임 아이디(`findClaimById`) — 한 주문에 반품이 여럿이다 |
-| 환불 확정 반영(tx2) | 기존 그대로(주문 `CANCEL_REQUESTED` → `CANCELED`) | `applyReturnRefunded` — 아래 |
-| 잠금 TX(`recordConfirmedRefundWithLock`)의 잠금 순서 | 클레임 → 주문(기존 그대로) | 주문 → 클레임(`lockOrderBeforeReturnClaim`, 잠근 주문을 반영에 넘겨 한 번만 잠근다) |
+| 재조회(2-CAS 의 두 번째 · 실패 횟수 세기) | 클레임 아이디(`findClaimById`) — #684 PR-2 부터(전에는 주문의 결정적 키 `findClaim(orderId)`). 부분 취소가 있으면 한 주문에 취소가 여럿이다 | 클레임 아이디(`findClaimById`) — 한 주문에 반품이 여럿이다 |
+| 환불 확정 반영(tx2) | `applyCancellationRefunded` — 주문 잠금 → 취소 정리(전량 `CANCELED` · 일부 `PAID`, #684 PR-2 · §1-4) | `applyReturnRefunded` — 아래 |
+| 잠금 TX(`recordConfirmedRefundWithLock`)의 잠금 순서 | 클레임 → 주문(기존 그대로) | 주문 → 클레임(`lockOrder`, 잠근 주문을 반영에 넘겨 한 번만 잠근다) |
 | 재고 복원 | `StockRestorationPort#restoreCancellation`(사유 `CANCELLATION`) | `restoreReturn`(사유 `RETURN`). `restock=false`(`Claim#requiresRestoration` 아님)면 부르지 않는다 |
 
 - **도메인 전이** — `markRefunded` · `markConfirmedRefund` · `complete` · `failRefund` · `failRestoration` · `retryLater` · `holdUntil` 의 취소 전용 제한을 풀고,
@@ -1252,8 +1293,8 @@ B2c-2 라 그 전까지 호출부는 스케줄러뿐이고 실제로 도는 행�
 | 다시 시도 — 복원 실패 | `RESTORATION_FAILED` → `REFUNDED` | 같다 |
 | 결제 취소 키 기한 기준 | 접수 시각 + 14일 | 승인 시각 + 14일(`Claim#refundDeadlineBase`) |
 | 수동 환불 확정 후보 | 결제사 거절은 늘, 미확인은 기한이 닫힌 뒤 | 같다 + **막힘(016)도 기한이 닫힌 뒤에만** |
-| 수동 확정 때 주문 | `CANCEL_REQUESTED`(→ 취소 완료) · `CANCELED` | `RETURN_REQUESTED` 만 — **주문 FOR UPDATE NOWAIT 먼저**, 같은 커밋에서 반품 정리 + `ADMIN` 이력 |
-| 복원 생략 종결 때 주문 | `CANCELED` 여야 한다 | 보지 않는다(정산 → 정산 전이, 주문 잠금 없음) |
+| 수동 확정 때 주문 | `CANCEL_REQUESTED`(→ 취소 정리 — 전량 취소 완료 · 일부 결제 완료 복귀) · `CANCELED` — **주문 FOR UPDATE NOWAIT 먼저**(#684 PR-2), 같은 커밋에서 취소 정리 + `ADMIN` 이력 | `RETURN_REQUESTED` 만 — **주문 FOR UPDATE NOWAIT 먼저**, 같은 커밋에서 반품 정리 + `ADMIN` 이력 |
+| 복원 생략 종결 때 주문 | 주문 전 항목 · 전 수량 취소는 `CANCELED` 여야 한다. 일부 수량 취소(#684)는 보지 않는다 | 보지 않는다(정산 → 정산 전이, 주문 잠금 없음) |
 
 - **막힘(`Claim#isRefundWaiting`, 처리 상황 `REFUND_WAITING`) — 첫 완료 기준** — 반품의 `REFUND_FAILED(PAYMENT_016)` 는 같은 결제의 다른 환불이 처리 중이라
   이 반품의 결제 취소가 만들어지지 않았을 수 있다. order 는 payment 원장을 읽지 못해 겹침과 이 클레임 자체의 거절을 가르지 못하므로 **돈이 나가지 않았다고 보고**
