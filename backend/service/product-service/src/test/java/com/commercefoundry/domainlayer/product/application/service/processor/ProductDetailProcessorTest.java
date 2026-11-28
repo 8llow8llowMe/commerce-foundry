@@ -3,13 +3,19 @@ package com.commercefoundry.domainlayer.product.application.service.processor;
 import static com.commercefoundry.shared.commerce.CurrencyCode.KRW;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.commercefoundry.domainlayer.category.domain.model.Category;
+import com.commercefoundry.domainlayer.product.application.exception.PriceSourceSnapshotReadException;
 import com.commercefoundry.domainlayer.product.application.exception.ProductErrorCode;
 import com.commercefoundry.domainlayer.product.application.exception.ProductException;
 import com.commercefoundry.domainlayer.product.application.info.CategoryPathInfo;
@@ -20,19 +26,24 @@ import com.commercefoundry.domainlayer.product.application.info.ProductImageInfo
 import com.commercefoundry.domainlayer.product.application.info.ProductOptionGroupInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductOptionValueInfo;
 import com.commercefoundry.domainlayer.product.application.info.ProductSkuInfo;
+import com.commercefoundry.domainlayer.product.application.port.out.PriceSourceSnapshotRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.SkuRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.StockRepositoryPort;
+import com.commercefoundry.domainlayer.product.application.port.out.query.PriceSourceSnapshotQueryResult;
 import com.commercefoundry.domainlayer.product.domain.model.CustomOrderInputType;
 import com.commercefoundry.domainlayer.product.domain.model.ImageType;
 import com.commercefoundry.domainlayer.product.domain.model.Product;
+import com.commercefoundry.domainlayer.product.domain.model.ProductCurrencyPrice;
 import com.commercefoundry.domainlayer.product.domain.model.SaleAvailability;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
+import com.commercefoundry.domainlayer.product.domain.model.SkuCurrencyPrice;
 import com.commercefoundry.domainlayer.product.domain.model.Stock;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
+import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.shared.commerce.Money;
 import java.math.BigDecimal;
@@ -45,6 +56,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 @ExtendWith(MockitoExtension.class)
 class ProductDetailProcessorTest {
@@ -74,6 +86,9 @@ class ProductDetailProcessorTest {
 
     @Mock
     private ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
+
+    @Mock
+    private PriceSourceSnapshotRepositoryPort priceSourceSnapshotRepositoryPort;
 
     @Nested
     @DisplayName("getVisibleProduct")
@@ -145,6 +160,7 @@ class ProductDetailProcessorTest {
             assertThat(detail.maxQuantityPerOrder()).isEqualTo(10);
             assertThat(detail.customOrder()).isNull();
             verifyNoInteractions(productCustomOrderFieldRepositoryPort);
+            verifyNoInteractions(priceSourceSnapshotRepositoryPort);
         }
 
         @Test
@@ -471,14 +487,160 @@ class ProductDetailProcessorTest {
         }
     }
 
+    /**
+     * PRICE_BOOK(#20 B4). 상세가 받은 상품 · 읽은 SKU 의 가격을 일부러 원천과 다르게 두어, 응답이 snapshot 투영(가격행) 값을 쓰는지 본다.
+     * 실제 경로에서는 같은 TX 의 한 시점이라 두 값이 같다.
+     */
+    @Nested
+    @DisplayName("getDetail — PRICE_BOOK")
+    class PriceBook {
+
+        private static final String FAILURE_MESSAGE = "상품 상세 가격 원천을 사용할 수 없습니다";
+
+        @Test
+        @DisplayName("호출자 TX 에 참여한 snapshot 의 투영으로 판매가 · 정가 · SKU 추가금 · SKU 판매가를 계산한다 — 은퇴로 걸러진 SKU 는 투영에만 있어도 된다")
+        void usesProjectedPrices() {
+            givenPriceBookOptionsAndSkus();
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(PRODUCT_ID))).willReturn(snapshot(
+                List.of(productPrice(39_000)), List.of(skuPrice(201, 1, 0), skuPrice(202, 2, 5_000), skuPrice(203, 3, 3_000))));
+            given(stockRepositoryPort.findAllBySkuIds(List.of(1L, 2L))).willReturn(ProductFixtures.stocks(1, 2));
+            given(productImageRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of());
+
+            ProductDetailInfo detail = priceBookProcessor().getDetail(staleProduct(), PATH);
+
+            assertThat(detail.salePrice()).isEqualTo(Money.of(ProductFixtures.BASE_PRICE, KRW));
+            assertThat(detail.listPrice()).isEqualTo(Money.of(ProductFixtures.LIST_PRICE, KRW));
+            assertThat(detail.discountRate()).isEqualTo(13);
+            assertThat(detail.saleStatus()).isEqualTo(SaleAvailability.ON_SALE);
+            assertThat(detail.skus()).extracting(ProductSkuInfo::skuId).containsExactly(1L, 2L);
+            assertThat(detail.skus()).extracting(ProductSkuInfo::additionalPrice).containsExactly(Money.zero(KRW), Money.of(5_000, KRW));
+            assertThat(detail.skus()).extracting(ProductSkuInfo::salePrice).containsExactly(Money.of(39_000, KRW), Money.of(44_000, KRW));
+            assertThat(detail.name()).as("비가격 필드는 상세가 받은 상품 그대로").isEqualTo("상품" + PRODUCT_ID);
+        }
+
+        @Test
+        @DisplayName("legacy 와 가격행이 어긋나면(drift) 고정 내부 오류다")
+        void drift() {
+            givenPriceBookOptionsAndSkus();
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(PRODUCT_ID))).willReturn(snapshot(
+                List.of(productPrice(39_001)), List.of(skuPrice(201, 1, 0), skuPrice(202, 2, 5_000), skuPrice(203, 3, 3_000))));
+
+            assertSanitizedFailure("LEGACY_DRIFT");
+        }
+
+        @Test
+        @DisplayName("가격행이 빠지면 보완하지 않고 고정 내부 오류다")
+        void missingPriceRow() {
+            givenPriceBookOptionsAndSkus();
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(PRODUCT_ID))).willReturn(snapshot(
+                List.of(productPrice(39_000)), List.of(skuPrice(201, 1, 0), skuPrice(203, 3, 3_000))));
+
+            assertSanitizedFailure("INVALID_PRICE_BOOK");
+        }
+
+        @Test
+        @DisplayName("snapshot 읽기가 실패하면 고정 내부 오류다")
+        void snapshotReadFailure() {
+            givenPriceBookOptionsAndSkus();
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(PRODUCT_ID)))
+                .willThrow(new PriceSourceSnapshotReadException(PriceSourceSnapshotReadException.Reason.CALLER_TRANSACTION_REQUIRED));
+
+            assertSanitizedFailure("CALLER_TRANSACTION_REQUIRED");
+        }
+
+        @Test
+        @DisplayName("상세가 읽은 SKU 가 투영에 없으면 고정 내부 오류다")
+        void skuNotInProjection() {
+            givenPriceBookOptionsAndSkus();
+            given(priceSourceSnapshotRepositoryPort.readByProductIdsInCurrentTransaction(List.of(PRODUCT_ID))).willReturn(
+                new PriceSourceSnapshotQueryResult(List.of(PRODUCT_ID), List.of(ProductFixtures.product(PRODUCT_ID)),
+                    List.of(ProductFixtures.sku(1, PRODUCT_ID, "5011,9001", 0, SaleStatus.ON_SALE)),
+                    List.of(productPrice(39_000)), List.of(skuPrice(201, 1, 0))));
+
+            assertSanitizedFailure("SKU_NOT_IN_PROJECTION");
+        }
+
+        /** 예외는 메시지 고정 · cause 없음, 로그는 사유 이름만 담은 warn 한 줄. 상품 · SKU 아이디와 금액은 어디에도 없다. 재고 · 이미지는 읽지 않는다. */
+        private void assertSanitizedFailure(String reason) {
+            Logger logger = (Logger) LoggerFactory.getLogger(ProductDetailProcessor.class);
+            ListAppender<ILoggingEvent> events = new ListAppender<>();
+            events.start();
+            logger.addAppender(events);
+            try {
+                Throwable error = catchThrowable(() -> priceBookProcessor().getDetail(staleProduct(), PATH));
+
+                assertThat(error).isExactlyInstanceOf(IllegalStateException.class).hasMessage(FAILURE_MESSAGE).hasNoCause();
+                assertThat(error.getSuppressed()).isEmpty();
+                assertThat(events.list).singleElement().satisfies(event -> {
+                    assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                    assertThat(event.getFormattedMessage()).isEqualTo("price source unavailable for product detail. reason=" + reason);
+                    assertThat(event.getThrowableProxy()).isNull();
+                });
+                verifyNoInteractions(stockRepositoryPort, productImageRepositoryPort, productCustomOrderFieldRepositoryPort);
+            } finally {
+                logger.detachAppender(events);
+                events.stop();
+            }
+        }
+
+        /** 색상 쪽빛(5011) · 은퇴 아이보리(5012), 사이즈 M(9001) · L(9002). SKU 3 은 은퇴 값을 써서 상세에서 빠진다. SKU 2 추가금(9)은 원천(5,000)과 다르다. */
+        private void givenPriceBookOptionsAndSkus() {
+            given(productOptionRepositoryPort.findGroupsByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.group(SIZE, PRODUCT_ID, "사이즈", 1),
+                ProductFixtures.group(COLOR, PRODUCT_ID, "색상", 2)
+            ));
+            given(productOptionRepositoryPort.findValuesByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.value(5011, COLOR, PRODUCT_ID, "쪽빛", 1),
+                ProductFixtures.value(9001, SIZE, PRODUCT_ID, "M", 1),
+                ProductFixtures.retiredValue(5012, COLOR, PRODUCT_ID, "아이보리", 2),
+                ProductFixtures.value(9002, SIZE, PRODUCT_ID, "L", 2)
+            ));
+            given(skuRepositoryPort.findAllByProductId(PRODUCT_ID)).willReturn(List.of(
+                ProductFixtures.sku(1, PRODUCT_ID, "5011,9001", 0, SaleStatus.ON_SALE),
+                ProductFixtures.sku(2, PRODUCT_ID, "5011,9002", 9, SaleStatus.ON_SALE),
+                ProductFixtures.sku(3, PRODUCT_ID, "5012,9001", 3_000, SaleStatus.STOP_SELLING)
+            ));
+        }
+
+        /** 원천의 legacy 상품 · 전체 SKU(은퇴 SKU 3 포함)와 주어진 기준통화 가격행. */
+        private PriceSourceSnapshotQueryResult snapshot(List<ProductCurrencyPrice> productPrices, List<SkuCurrencyPrice> skuPrices) {
+            return new PriceSourceSnapshotQueryResult(List.of(PRODUCT_ID), List.of(ProductFixtures.product(PRODUCT_ID)), List.of(
+                ProductFixtures.sku(1, PRODUCT_ID, "5011,9001", 0, SaleStatus.ON_SALE),
+                ProductFixtures.sku(2, PRODUCT_ID, "5011,9002", 5_000, SaleStatus.ON_SALE),
+                ProductFixtures.sku(3, PRODUCT_ID, "5012,9001", 3_000, SaleStatus.STOP_SELLING)
+            ), productPrices, skuPrices);
+        }
+
+        /** 상세가 받은 상품 — 가격만 원천과 다르다. */
+        private Product staleProduct() {
+            return ProductFixtures.product(PRODUCT_ID).withPricing(Money.of(1, KRW), null);
+        }
+
+        private ProductCurrencyPrice productPrice(long saleAmount) {
+            return new ProductCurrencyPrice(101, PRODUCT_ID, Money.of(saleAmount, KRW), Money.of(ProductFixtures.LIST_PRICE, KRW));
+        }
+
+        private SkuCurrencyPrice skuPrice(long id, long skuId, long amount) {
+            return new SkuCurrencyPrice(id, skuId, Money.of(amount, KRW));
+        }
+
+        private ProductDetailProcessor priceBookProcessor() {
+            return processor(features(true, false, false), PriceSourceProperties.Mode.PRICE_BOOK);
+        }
+    }
+
     private ProductDetailProcessor processor(boolean customOrderFeature) {
         return processor(features(customOrderFeature, false, false));
     }
 
     private ProductDetailProcessor processor(StoreProperties.Features features) {
+        return processor(features, PriceSourceProperties.Mode.LEGACY);
+    }
+
+    private ProductDetailProcessor processor(StoreProperties.Features features, PriceSourceProperties.Mode mode) {
         return new ProductDetailProcessor(
             productRepositoryPort, productOptionRepositoryPort, skuRepositoryPort, stockRepositoryPort, productImageRepositoryPort, productCustomOrderFieldRepositoryPort,
-            new StoreProperties(features)
+            new StoreProperties(features), priceSourceSnapshotRepositoryPort, new PriceSourceProperties(mode)
         );
     }
 

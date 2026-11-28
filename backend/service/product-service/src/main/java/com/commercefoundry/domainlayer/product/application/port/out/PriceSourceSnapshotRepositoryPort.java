@@ -3,7 +3,19 @@ package com.commercefoundry.domainlayer.product.application.port.out;
 import com.commercefoundry.domainlayer.product.application.port.out.query.PriceSourceSnapshotQueryResult;
 import java.util.List;
 
-/** 가격 투영 전 원천을 한 읽기 snapshot으로 조회한다. 생산 읽기·쓰기 경로에는 아직 연결하지 않는다. */
+/**
+ * 가격 투영 전 원천을 한 읽기 snapshot으로 조회한다. 두 메서드는 입력 정규화·상한·조회 순서·예외 정제가 같고 트랜잭션 경계만 다르다.
+ * 생산 경로 연결은 PRICE_BOOK 모드의 고객 상품 상세(B4)뿐이고, 그 경로는 {@link #readByProductIdsInCurrentTransaction}을 쓴다.
+ */
 public interface PriceSourceSnapshotRepositoryPort {
+
+    /** 호출자 TX를 정지하고 새 REPEATABLE_READ read-only TX에서 읽는다. 생산 경로에는 연결하지 않는다. */
     PriceSourceSnapshotQueryResult readByProductIds(List<Long> productIds);
+
+    /**
+     * 호출자 TX에 참여해 같은 커넥션·같은 snapshot으로 읽는다 — 호출자가 먼저 읽은 상품·SKU와 한 시점이다(#20 D3).
+     * 호출자 TX가 없거나 read-only가 아니거나 격리 수준이 REPEATABLE_READ·SERIALIZABLE이 아니면 SQL 없이
+     * {@code CALLER_TRANSACTION_REQUIRED}로 거절한다. 빈 입력은 TX 확인 없이 불변 빈 결과다.
+     */
+    PriceSourceSnapshotQueryResult readByProductIdsInCurrentTransaction(List<Long> productIds);
 }

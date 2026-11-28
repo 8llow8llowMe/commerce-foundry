@@ -7,6 +7,7 @@ import static org.mockito.BDDMockito.given;
 
 import com.commercefoundry.domainlayer.category.application.service.processor.CategoryProcessor;
 import com.commercefoundry.domainlayer.product.adapter.in.web.presenter.ProductWebPresenter;
+import com.commercefoundry.domainlayer.product.application.port.out.PriceSourceSnapshotRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductCustomOrderFieldRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductImageRepositoryPort;
 import com.commercefoundry.domainlayer.product.application.port.out.ProductOptionRepositoryPort;
@@ -22,6 +23,7 @@ import com.commercefoundry.domainlayer.product.domain.model.Product;
 import com.commercefoundry.domainlayer.product.domain.model.ProductImage;
 import com.commercefoundry.domainlayer.product.domain.model.SaleStatus;
 import com.commercefoundry.domainlayer.product.support.ProductFixtures;
+import com.commercefoundry.global.properties.PriceSourceProperties;
 import com.commercefoundry.global.properties.StoreProperties;
 import com.commercefoundry.security.resourceserver.ResourceServerSecurityConfigurer;
 import com.commercefoundry.security.token.JwtVerificationPropertiesConfig;
@@ -81,6 +83,13 @@ class ProductWebFeatureFlagControllerTest {
 
     @MockitoBean
     private ProductCustomOrderFieldRepositoryPort productCustomOrderFieldRepositoryPort;
+
+    /** 가격 정본은 LEGACY 다 — snapshot 포트는 불리지 않는다(#20 B4). */
+    @MockitoBean
+    private PriceSourceProperties priceSourceProperties;
+
+    @MockitoBean
+    private PriceSourceSnapshotRepositoryPort priceSourceSnapshotRepositoryPort;
 
     @Nested
     @DisplayName("프리오더")
@@ -182,6 +191,7 @@ class ProductWebFeatureFlagControllerTest {
 
     private void givenFeatures(boolean customOrder, boolean preorder, boolean productVideo) {
         given(storeProperties.features()).willReturn(new StoreProperties.Features(customOrder, preorder, productVideo, false));
+        given(priceSourceProperties.mode()).willReturn(PriceSourceProperties.Mode.LEGACY);
     }
 
     private void givenListRows(ProductListQueryResult... rows) {

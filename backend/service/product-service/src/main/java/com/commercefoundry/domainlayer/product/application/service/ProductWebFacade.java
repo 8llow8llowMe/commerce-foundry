@@ -18,6 +18,7 @@ import java.util.Set;
 import org.springframework.context.i18n.LocaleContextHolder;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -45,8 +46,14 @@ public class ProductWebFacade implements ProductWebUseCase {
         return productWebPresenter.toListResponse(productListProcessor.search(criteria, locale), locale);
     }
 
-    /** 상품을 먼저 읽는다 — 없거나 숨긴 상품이면 카테고리를 읽지 않고 404 다. */
+    /**
+     * 상품을 먼저 읽는다 — 없거나 숨긴 상품이면 카테고리를 읽지 않고 404 다.
+     *
+     * <p>REPEATABLE_READ 는 PRICE_BOOK 모드의 가격 원천 snapshot 이 이 TX 에 참여해 상품 · SKU · 가격행 · 재고를 한 시점 · 커넥션 하나로 읽게 하려는 것이다(#20 D3).
+     * 그러지 않으면 읽기 사이에 커밋된 가격 수정이 가짜 drift(500)로 보인다. LEGACY 도 같은 격리로 읽는다 — 읽기 전용이라 응답은 같다.
+     */
     @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public ProductDetailResponse getProduct(long productId) {
         Locale locale = LocaleContextHolder.getLocale();
         Product product = productDetailProcessor.getVisibleProduct(productId);

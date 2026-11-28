@@ -19,6 +19,8 @@ public final class PriceSourceSnapshotReadException extends RuntimeException {
         INVALID_INPUT,
         PRODUCT_MISSING,
         ROW_LIMIT_EXCEEDED,
-        READ_FAILED
+        READ_FAILED,
+        /** 호출자 TX 참여 읽기에서 호출자 TX가 없거나 read-only·REPEATABLE_READ 이상이 아니다. */
+        CALLER_TRANSACTION_REQUIRED
     }
 }
