@@ -330,6 +330,30 @@ drift가 있어도 투영 자체는 실제 가격행을 선택하며, 별도 대
   H2/PostgreSQL 통합 시험(호출자 TX 없음 거절, 첫 읽기 뒤 다른 TX 커밋에도 처음 시점 값·가짜 drift 없음·커넥션 1개,
   실제 `ProductWebUseCase` 프록시로 부른 PRICE_BOOK 상세의 투영 가격 응답·가격행 누락의 정제된 실패 — Facade TX 속성이 참여 조건을 만족하는지 지킨다).
 
+### PR-2b-B4b internal 주문 금액 reader 연결
+
+- 서비스 간 SKU 조회(`SkuInternalProcessor.getSkus`, R4 — order-service 주문 금액의 원천)는 `PRICE_BOOK` 이면 상품을 읽은 뒤 응답 대상 상품(숨김·삭제 포함)을
+  아이디 오름차순 20개 묶음으로 `readByProductIdsInCurrentTransaction` → `PriceSourceSnapshotResolver.resolveEach` 한다. 요청 SKU 상한 100 이라 묶음은 최대 5개이고
+  묶음마다 최대 4 SELECT 가 더해진다(N+1 없음). `SkuInternalFacade.getSkus` 의 기존 readOnly·REPEATABLE_READ TX 에 참여하므로 묶음 사이도 한 시점이다.
+  판매가는 `ProductPricing.skuSalePrice(투영 상품 판매가, 투영 SKU 추가금)`, 추가금은 투영 SKU 값이다. 재고·옵션·입력 항목은 남은 SKU 로만 읽는다.
+- D5: internal 가격이 정본(가격행)과 어긋나면 주문을 거절한다. D8: 가격행 drift·누락 등 상품별 해석 실패와 응답 SKU 가 투영에 없는 상품은 **그 상품의 SKU 를 응답에서 뺀다**.
+  internal 계약·order-service 코드는 바뀌지 않고, order 의 기존 "없는 SKU" 경로가 주문서·주문 생성을 409 `ORDER_003` 으로 거절한다(기록·선점 전).
+  500 으로 거절하지 않는 이유는 order-service 가 product 5xx 를 서킷 실패로 세기 때문이다 — 상품 하나가 서킷을 열면 전체 장바구니·주문이 막힌다.
+  묶음 구조 오류(다른 상품 소속 행·행 아이디 중복 등)는 상품을 가를 수 없어 그 묶음의 상품을 모두 뺀다. 장바구니에서는 그 줄이 없는 SKU(`STOP_SELLING`, 이름·가격 없음)로 보이고
+  담기는 `CART_002` 404 다.
+- `resolveEach` 는 묶음 구조 오류만 전체 예외로 두고 상품별 사유(`INVALID_LEGACY`·`INVALID_PRICE_BOOK`·`LEGACY_DRIFT`)를 결과로 돌려준다.
+  `resolve`(상세)는 그 결과의 요청 순서상 첫 실패로 전체를 거절해 기존 의미 그대로다.
+- 운영자 알림: 원시 아이디·금액 없이 뺀 상품 수와 사유별 건수만 담은 WARN 한 줄, 그리고 카운터 `commerce.product.price-source.internal-sku.excluded`
+  (태그 `reason` 하나 — 해석 사유 enum 이름 또는 `SKU_NOT_IN_PROJECTION`). 지표는 application 의 `PriceSourceMetricsPort` 와
+  `adapter/out/observation/PriceSourceMetricsAdapter`(Micrometer, 레지스트리가 없거나 실패하면 무시) 로 둔다.
+- snapshot **읽기 자체**의 실패(`PriceSourceSnapshotReadException` — DB 오류·`ROW_LIMIT_EXCEEDED`·`CALLER_TRANSACTION_REQUIRED` 등)는 인프라 장애라
+  상품을 빼지 않고 메시지 고정·cause 없는 `IllegalStateException` → 500 `COMMON_000` 이다. 묶음을 포트 상한(50)보다 작은 20개로 잡는 이유는
+  상품당 SKU 상한 100(PRODUCT_095·SKU_ADMIN_102) × 20 = 2000 으로 SKU 행 상한을 넘지 않게 해, 정상 데이터에서 `ROW_LIMIT_EXCEEDED` 500 이 서킷 실패로 세어지지 않게 하려는 것이다.
+- `LEGACY`(기본)는 snapshot·지표 포트를 부르지 않고 응답이 같다. `PriceSourceModeGuard` 의 PRICE_BOOK 기동 거절은 B7 까지 유지한다.
+- 시험: Processor 모드별 단위 시험(투영 가격·drift/가격행 누락/투영 밖 SKU/묶음 구조 오류의 제외와 순서 유지·사유별 지표·정제 로그·읽기 실패 500·51개 상품 20개 묶음·LEGACY 무호출),
+  Resolver `resolveEach` 시험, 지표 어댑터 시험, H2/PostgreSQL 통합 시험(실제 `SkuInternalUseCase` 프록시로 drift 상품만 빠짐·카운터 1),
+  order `OrderWebFacadeTest`(product 응답에서 빠진 SKU → `ORDER_003`, 기록·선점 없음, 서킷 실패 0).
+
 B 후속은 모든 고객·internal·admin reader, 목록 정렬·페이지/count·SKU 집계·display/look과 다섯 가격 writer,
 전체 Product 저장 경로를 같은 단일 정본으로 연결하는 작업이다. 동시 읽기 일관성·양방향 writer 경합·실패 rollback·혼합 배포와
 원복 검증을 마친 뒤 운영 전환을 별도로 승인한다. A 완료는 PR-2b·B1·#20 전체 완료나 USD 구매 개방을 뜻하지 않는다.
