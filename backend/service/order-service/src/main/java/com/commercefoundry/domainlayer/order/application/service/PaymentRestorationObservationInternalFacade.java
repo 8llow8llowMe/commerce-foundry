@@ -13,7 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionException;
 
 /**
- * 결제 반영 재고 복원 작업 관측 (#808). DB 조회 · 트랜잭션 실패는 503 {@code ORDER_047} 로 바꾼다 — 관측 불가를 0 건으로 보이지 않게.
+ * 결제 반영 재고 복원 작업 관측 (#808). DB 조회 · 트랜잭션 실패는 503 {@code ORDER_057} 로 바꾼다 — 관측 불가를 0 건으로 보이지 않게.
  * 원인 메시지는 남기지 않고 예외 타입만 남긴다.
  */
 @Slf4j

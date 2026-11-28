@@ -93,14 +93,14 @@ class PaymentRestorationObservationInternalControllerTest {
     }
 
     @Test
-    @DisplayName("관측 불가는 503 · ORDER_047 이고 0 건으로 보이지 않는다")
+    @DisplayName("관측 불가는 503 · ORDER_057 이고 0 건으로 보이지 않는다")
     void unavailableIs503() {
         given(useCase.observe()).willThrow(new OrderException(OrderErrorCode.PAYMENT_RESTORATION_OBSERVATION_UNAVAILABLE));
 
         MvcTestResult result = getAsOperations();
 
         assertThat(result).hasStatus(HttpStatus.SERVICE_UNAVAILABLE);
-        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_047");
+        assertThat(result).bodyJson().extractingPath("$.dataHeader.resultCode").isEqualTo("ORDER_057");
         assertThat(result).bodyJson().extractingPath("$.dataBody").isNull();
     }
 

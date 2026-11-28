@@ -146,7 +146,7 @@ public enum OrderErrorCode {
     /** 서버가 다시 계산한 환불액 · 통화가 운영자가 화면에서 본 값과 다르다 — 그 사이 다른 반품이 정산됐거나 통화가 다르다(#17 B2c-2). */
     RETURN_REFUND_CHANGED("ORDER_046", "환불액이 화면에서 본 금액과 다릅니다. 새로고침해 환불액을 다시 확인한 뒤 승인해 주세요.", HttpStatus.CONFLICT),
     /** 결제 반영 재고 복원 현황 관측(#808, operations internal)의 DB 조회 · 트랜잭션 실패 — 관측 불가이지 0 건이 아니다. */
-    PAYMENT_RESTORATION_OBSERVATION_UNAVAILABLE("ORDER_047", "재고 복원 현황을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
+    PAYMENT_RESTORATION_OBSERVATION_UNAVAILABLE("ORDER_057", "재고 복원 현황을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.", HttpStatus.SERVICE_UNAVAILABLE),
 
     /** 코드 접두어 없는 검증 메시지 · 역직렬화 실패의 폴백. */
     INVALID_REQUEST("ORDER_100", "요청 값이 올바르지 않습니다.", HttpStatus.BAD_REQUEST),
