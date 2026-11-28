@@ -64,11 +64,19 @@ class ClaimAdminRecoveryProcessorTest {
         Order order = new Order(1, placed.memberId(), status, placed.quote(), placed.itemIds(), placed.shippingAddress(), placed.stockReservationId(),
             placed.paymentDueAt(), null, null, NOW, 6L);
         when(orders.findById(1L)).thenReturn(Optional.of(order));
+        // 수동 환불 확정은 주문을 NOWAIT 으로 잠가 읽는다(#684 PR-2 — 취소도 반품과 같이 열림 → 정산 전이 전에 잠근다)
+        when(orders.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
         return order;
     }
 
     private static Claim cancellation(Claim.Status status, Instant next, String failure) {
         return new Claim(2, 1, UUID.randomUUID(), Claim.Type.CANCELLATION, status, krw(1_000), 77L, 5, next, failure, ITEMS, NOW, 4L);
+    }
+
+    @org.junit.jupiter.api.BeforeEach
+    void lockedReadFollowsStoredClaim() {
+        // 수동 환불 확정은 주문 잠금 뒤 클레임을 잠가 다시 읽는다(#684 PR-2) — 이 시험의 잠근 읽기는 지금 스텁된 읽기와 같은 값이다
+        when(claims.findByIdForUpdate(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(invocation -> claims.findById(invocation.<Long>getArgument(0)));
     }
 
     private Claim stored(Claim claim) {

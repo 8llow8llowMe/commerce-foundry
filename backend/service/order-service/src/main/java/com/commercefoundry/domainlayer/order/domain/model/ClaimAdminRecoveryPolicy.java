@@ -16,8 +16,8 @@ import java.util.Set;
 public final class ClaimAdminRecoveryPolicy {
     private static final String ORDER_STATUS_UNEXPECTED = "ORDER_STATUS_UNEXPECTED";
     /**
-     * 복원 생략 종결을 받는 확정 복원 실패 코드. {@code ORDER_STATUS_UNEXPECTED}(환불 때 주문이 취소 요청 · 취소 완료가 아니었다)는 넣지 않는다 —
-     * 주문이 {@code CANCELED} 로 갈 경로가 없어 종결 자격(주문 취소 완료)을 영영 채우지 못한다. 그 건의 수습 경로는 #695 다(#17 A3).
+     * 복원 생략 종결을 받는 확정 복원 실패 코드. {@code ORDER_STATUS_UNEXPECTED}(환불 때 주문을 정리할 수 없었다 — 주문이 취소 요청 · 취소 완료가 아니었거나
+     * 정리 판정이 불가능했다)는 넣지 않는다 — 주문이 정리될 경로가 없어 종결해도 주문이 맞지 않는다. 그 건의 수습 경로는 #695 다(#17 A3).
      */
     private static final Set<String> COMPLETABLE_FAILURES = Set.of("PRODUCT_027", "PRODUCT_028", "PRODUCT_029", "PRODUCT_003", "RESTORATION_DATA_INVALID");
 
@@ -50,8 +50,9 @@ public final class ClaimAdminRecoveryPolicy {
 
     /**
      * 수동 환불 확정의 실행 자격 (#17 A3, 반품 B2b) — {@link #isRefundConfirmationCandidate} 이고, 같은 저장 주문이 확정과 함께 정리될 수 있는 상태여야 한다.
-     * 취소는 취소 요청(확정과 함께 취소 완료로 간다) 또는 이미 취소 완료, 반품은 반품 요청이다(확정과 함께 반품 정리 — {@link ReturnRefundPolicy}).
-     * 그 밖의 주문 상태면 환불 확정을 기록해도 재고 복원 · 주문 전이를 이을 수 없다.
+     * 취소는 취소 요청(확정과 함께 취소 정리 — 전량이면 취소 완료, 일부면 결제 완료로 복귀, #684 {@link CancellationRefundPolicy}) 또는 이미 취소 완료,
+     * 반품은 반품 요청이다(확정과 함께 반품 정리 — {@link ReturnRefundPolicy}). 그 밖의 주문 상태면 환불 확정을 기록해도 재고 복원 · 주문 전이를 이을 수 없다.
+     * 열린 취소는 주문당 하나이고 그동안 주문은 취소 요청이라, 결제 완료로 돌아간 주문의 환불 실패 취소는 데이터 이상이다.
      */
     public static void requireRefundConfirmation(Claim claim, Order order, boolean refundRetryClosed) {
         requireStored(claim);
@@ -68,18 +69,34 @@ public final class ClaimAdminRecoveryPolicy {
     }
 
     /**
-     * 복원 생략 종결의 실행 자격 (#17 A3, 반품 B2b) — 취소는 같은 주문이 취소 완료여야 한다. 반품은 주문 상태를 보지 않는다 — 반품 복원은 주문이 정리 뒤
-     * 배송 완료 · 구매 확정으로 갔어도 진행하므로(B2a) 종결도 같다. 정산 → 정산 전이라 주문 잠금이 필요 없다({@code order-flow-guide.md} §5 B2a).
+     * 복원 생략 종결의 실행 자격 (#17 A3, 반품 B2b, 부분 취소 #684 PR-2) — 주문 전 항목 · 전 수량을 담은 취소(부분 취소 없던 전체 취소)는 같은 주문이 취소 완료여야
+     * 한다 — 그 정리 결과는 늘 취소 완료다. 일부 수량만 담은 취소(부분 취소 · 부분 취소 뒤 남은 수량의 전체 취소)와 반품은 주문 상태를 보지 않는다 — 부분 취소
+     * 정리 뒤 주문은 결제 완료로 돌아가 상품 준비중 · 배송 · 다음 취소로 넘어갈 수 있고, 복원은 주문 상태와 무관하게 진행하므로(B2a) 종결도 같다. 주문을 정리하지
+     * 못한 클레임({@code ORDER_STATUS_UNEXPECTED})은 실패 코드에서 이미 빠진다. 정산 → 정산 전이라 주문 잠금이 필요 없다({@code order-flow-guide.md} §5 B2a).
      */
     public static void requireCompletion(Claim claim, Order order) {
         requireStored(claim);
         requireSameStoredOrder(claim, order);
-        if (claim.type() == Claim.Type.CANCELLATION && order.status() != OrderStatus.CANCELED) {
+        if (claim.type() == Claim.Type.CANCELLATION && coversWholeOrder(claim, order) && order.status() != OrderStatus.CANCELED) {
             throw new IllegalStateException("같은 주문의 취소 완료를 확인해야 종결합니다");
         }
         if (!isCompletionCandidate(claim)) {
             throw new IllegalStateException("확정된 복원 종결 실패만 수동 종결합니다");
         }
+    }
+
+    /** 클레임이 주문의 모든 항목을 주문 수량 그대로 담았는가 — 부분 취소 없이 한 전체 취소다(#684). */
+    private static boolean coversWholeOrder(Claim claim, Order order) {
+        if (claim.items().size() != order.itemIds().size()) {
+            return false;
+        }
+        for (ClaimItem item : claim.items()) {
+            int index = order.itemIds().indexOf(item.orderItemId());
+            if (index < 0 || order.quote().lines().get(index).quantity() != item.quantity()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 주문을 보지 않고 클레임만으로 본 수동 종결 후보 — 어드민 상세의 버튼 표시용이다. 실행 자격은 주문까지 보는 {@link #requireCompletion} 이다 (#17 A3). */

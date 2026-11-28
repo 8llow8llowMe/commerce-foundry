@@ -223,7 +223,7 @@ class OrderCancellationProcessorTest {
     void refundSucceeded() {
         Claim claim = requestedClaim();
         Order requested = order(OrderStatus.CANCEL_REQUESTED);
-        when(orders.findById(claim.orderId())).thenReturn(Optional.of(requested));
+        when(orders.findByIdForUpdate(claim.orderId())).thenReturn(Optional.of(requested));
 
         Claim refunded = processor(false).recordRefund(claim, CancellationStepOutcome.done());
 
@@ -242,7 +242,7 @@ class OrderCancellationProcessorTest {
     @DisplayName("주문이 이미 취소 완료면 클레임만 REFUNDED 로 바꾸고 주문 · 이력은 쓰지 않는다")
     void refundSucceededOnCanceledOrder() {
         Claim claim = requestedClaim();
-        when(orders.findById(claim.orderId())).thenReturn(Optional.of(order(OrderStatus.CANCELED)));
+        when(orders.findByIdForUpdate(claim.orderId())).thenReturn(Optional.of(order(OrderStatus.CANCELED)));
 
         assertThat(processor(false).recordRefund(claim, CancellationStepOutcome.done()).status()).isEqualTo(Claim.Status.REFUNDED);
         verify(orders, never()).saveStatusChange(any(), any());
@@ -252,7 +252,7 @@ class OrderCancellationProcessorTest {
     @DisplayName("미확정으로 닫힌 클레임(REFUND_UNCONFIRMED)의 늦은 환불 성공도 받아 REFUNDED + 주문 취소 완료다")
     void lateRefundSucceeded() {
         Claim unconfirmed = stored(requestedClaim().failRefund(Claim.REFUND_UNCONFIRMED), 4L);
-        when(orders.findById(unconfirmed.orderId())).thenReturn(Optional.of(order(OrderStatus.CANCEL_REQUESTED)));
+        when(orders.findByIdForUpdate(unconfirmed.orderId())).thenReturn(Optional.of(order(OrderStatus.CANCEL_REQUESTED)));
 
         assertThat(processor(false).recordRefund(unconfirmed, CancellationStepOutcome.done()).status()).isEqualTo(Claim.Status.REFUNDED);
         verify(orders).saveStatusChange(any(), any());
@@ -365,7 +365,7 @@ class OrderCancellationProcessorTest {
     @DisplayName("환불은 확정됐는데 주문이 취소 요청 · 취소 완료가 아니면(데이터 이상) 복원하지 않고 RESTORATION_FAILED(ORDER_STATUS_UNEXPECTED), 주문은 두다")
     void refundOnUnexpectedOrderStatusClosesClaim(OrderStatus status) {
         Claim claim = requestedClaim();
-        when(orders.findById(claim.orderId())).thenReturn(Optional.of(order(status)));
+        when(orders.findByIdForUpdate(claim.orderId())).thenReturn(Optional.of(order(status)));
 
         Claim closed = processor(false).recordRefund(claim, CancellationStepOutcome.done());
 
@@ -381,7 +381,7 @@ class OrderCancellationProcessorTest {
         Claim requested = requestedClaim();
         Claim refundedAtMax = withAttempts(stored(requestedClaim().markRefunded(NOW), 3L), MAX_ATTEMPTS);
         Claim completed = stored(requestedClaim().markRefunded(NOW).complete(), 5L);
-        when(claims.findByOrderIdAndRequestKey(eq(1L), any()))
+        when(claims.findById(requested.id()))
             .thenReturn(Optional.of(requested), Optional.of(refundedAtMax), Optional.of(completed), Optional.empty());
         ArgumentCaptor<Claim> saved = ArgumentCaptor.forClass(Claim.class);
 
@@ -400,7 +400,7 @@ class OrderCancellationProcessorTest {
     void oldAttemptCannotCountFailureAgainstNewLeaseOrPhase() {
         Claim attempted = requestedClaim();
         for (Claim current : java.util.List.of(stored(attempted.holdUntil(NOW.plusSeconds(60)), 1L), stored(attempted.markRefunded(NOW), 1L))) {
-            when(claims.findByOrderIdAndRequestKey(eq(1L), any())).thenReturn(Optional.of(current));
+            when(claims.findById(attempted.id())).thenReturn(Optional.of(current));
             processor(false).recordAttemptFailure(attempted);
         }
         verify(claims, never()).update(any());
