@@ -20,6 +20,20 @@ export type ClaimQuery = {
 
 export const DEFAULT_QUERY: ClaimQuery = { type: null, status: null, orderId: null, page: 0 };
 
+/** 확인이 필요한 클레임을 바로 거는 조건 — 반품 승인 대기 · 환불 실패 · 재고 복원 실패 */
+export const CLAIM_PRESETS: { label: string; query: ClaimQuery }[] = [
+  { label: '반품 승인 대기', query: { ...DEFAULT_QUERY, type: 'RETURN', status: 'REQUESTED' } },
+  { label: '환불 실패', query: { ...DEFAULT_QUERY, status: 'REFUND_FAILED' } },
+  { label: '재고 복원 실패', query: { ...DEFAULT_QUERY, status: 'RESTORATION_FAILED' } },
+];
+
+/** 지금 조건이 바로가기 조건과 같은지(페이지는 보지 않는다) */
+export function isClaimPreset(query: ClaimQuery, preset: ClaimQuery): boolean {
+  return (
+    query.type === preset.type && query.status === preset.status && query.orderId === preset.orderId
+  );
+}
+
 type SearchParams = Record<string, string | string[] | undefined>;
 
 const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);

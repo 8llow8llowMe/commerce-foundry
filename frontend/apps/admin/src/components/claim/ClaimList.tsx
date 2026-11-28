@@ -9,6 +9,7 @@ import { accessDeniedOf, LOAD_FAILED, type AccessDenied } from '@/lib/api-errors
 import { claimsApiPath, claimsHref, hasFilter, type ClaimQuery } from '@/lib/claim/query';
 import type { ClaimListItem } from '@/lib/claim/types';
 import { ClaimFilters } from './ClaimFilters';
+import { ClaimQuickFilters } from './ClaimQuickFilters';
 import { ClaimTable } from './ClaimTable';
 
 /** `reload` — 어느 다시 읽기의 응답인지. "다시 불러오기" 뒤 새 응답을 기다리는 중을 가른다 */
@@ -19,9 +20,16 @@ type Loaded =
 
 /**
  * 어드민 클레임 목록(#30 · BE #574) — `GET /api/v1/admin/claims`. 조건은 주소(`query`)가 정본이고 클레임 아이디 내림차순이다.
- * 읽기 전용이다 — 승인 · 거절 · 환불 실행은 BE #17 잔여라 자리를 두지 않는다.
+ * 목록은 읽기 전용이고 처리(반품 승인 · 거절, 결제 후 취소 수습)는 상세에서 한다. 위에 "확인이 필요한 건" 바로가기를 둔다.
  */
-export function ClaimList({ query }: { query: ClaimQuery }) {
+export function ClaimList({
+  query,
+  showPayments = true,
+}: {
+  query: ClaimQuery;
+  /** "결제 확인 중" 바로가기를 둘지 — 결제 확인 화면 권한(`SETTLEMENT_READ`). 역할을 모르면 true */
+  showPayments?: boolean;
+}) {
   const path = claimsApiPath(query);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [reload, setReload] = useState(0);
@@ -53,12 +61,14 @@ export function ClaimList({ query }: { query: ClaimQuery }) {
         <h1 className="text-xl font-semibold">클레임</h1>
         <p className="mt-1 text-sm text-muted-fg">
           고객이 접수한 반품과 결제 뒤 취소를 봅니다. 환불 실패 · 재고 복원 실패는 운영자 확인이
-          필요한 상태입니다. 결제 후 취소는 상세에서 처리 상황을 보고 다시 시도하거나, 대표 관리자가
-          환불 완료로 확정 · 재고 복원 없이 종결할 수 있습니다. 반품 승인 · 거절 · 환불은 아직 이
-          화면에서 하지 않습니다. 예상 환불액이 미산정이면 아직 금액이 정해지지 않은 것입니다(0원이
-          아닙니다).
+          필요한 상태입니다. 접수된 반품은 상세에서 검수 결과에 맞게 승인하거나 거절합니다. 결제 후
+          취소는 상세에서 처리 상황을 보고 다시 시도하거나, 대표 관리자가 환불 완료로 확정 · 재고
+          복원 없이 종결할 수 있습니다. 예상 환불액이 미산정이면 아직 금액이 정해지지 않은
+          것입니다(0원이 아닙니다).
         </p>
       </div>
+
+      <ClaimQuickFilters query={query} showPayments={showPayments} />
 
       <div data-tour="claim-filters">
         <ClaimFilters key={claimsHref(query)} query={query} />

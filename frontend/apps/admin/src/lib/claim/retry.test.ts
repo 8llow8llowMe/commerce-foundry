@@ -34,6 +34,8 @@ const claim = (type: string, situation: string, requestedAt = '2026-11-01T00:00:
       lastDecision: null,
       version: 3,
     },
+    returnApproval: null,
+    returnDecision: null,
   }) satisfies ClaimDetail;
 
 describe('retryFailure', () => {
@@ -103,10 +105,30 @@ describe('refundDeadlineOf', () => {
     const deadline = refundDeadlineOf(claim('CANCELLATION', 'REFUND_UNCONFIRMED'), requested);
     expect(deadline?.at.toISOString()).toBe('2026-11-15T00:00:00.000Z');
     expect(deadline?.remaining).toBe('14일 남음');
+    expect(deadline?.basis).toBe('접수');
     expect(
       refundDeadlineOf(claim('CANCELLATION', 'RESTORATION_UNCONFIRMED'), requested),
     ).toBeNull();
     expect(refundDeadlineOf(claim('CANCELLATION', 'REFUND_REJECTED'), requested)).toBeNull();
+  });
+
+  it('반품은 접수가 아니라 승인 시각 + 14일이고, 승인 기록이 없으면 기한을 보이지 않는다', () => {
+    const approved = (situation: string) => ({
+      ...claim('RETURN', situation),
+      returnApproval: {
+        fault: { code: 'CUSTOMER', name: '고객 귀책', description: '' },
+        restock: true,
+        deduction: { amount: 0, currency: 'KRW' as const },
+        approvedAt: '2026-11-05T00:00:00Z',
+      },
+    });
+    const deadline = refundDeadlineOf(approved('REFUND_UNCONFIRMED'), requested);
+    expect(deadline?.at.toISOString()).toBe('2026-11-19T00:00:00.000Z');
+    expect(deadline?.remaining).toBe('18일 남음');
+    expect(deadline?.basis).toBe('승인');
+    // 같은 결제의 다른 환불에 막힌 반품(REFUND_WAITING)도 다시 시도가 열린 환불 단계라 기한을 보인다
+    expect(refundDeadlineOf(approved('REFUND_WAITING'), requested)?.basis).toBe('승인');
+    expect(refundDeadlineOf(approved('REFUND_REJECTED'), requested)).toBeNull();
     expect(refundDeadlineOf(claim('RETURN', 'REFUND_UNCONFIRMED'), requested)).toBeNull();
   });
 

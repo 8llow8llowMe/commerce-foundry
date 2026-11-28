@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { canAccessPath, permissionsOf, requiredPermissionOf, visibleNav } from './permissions';
+import {
+  canAccessPath,
+  canManageOrders,
+  permissionsOf,
+  requiredPermissionOf,
+  visibleNav,
+} from './permissions';
 
 type Group = { title: string; items: { label: string; href?: string }[] };
 
@@ -103,5 +109,15 @@ describe('visibleNav', () => {
   it('OWNER · 역할 모름은 그대로다', () => {
     expect(visibleNav(NAV, permissionsOf('OWNER'))).toEqual(NAV);
     expect(visibleNav(NAV, null)).toEqual(NAV);
+  });
+});
+
+describe('canManageOrders', () => {
+  it('ORDER_MANAGE 는 ADMIN · OWNER · MANAGER 가 갖고 STAFF 는 없다. 역할을 모르면 null', () => {
+    expect(canManageOrders('ADMIN')).toBe(true);
+    expect(canManageOrders('OWNER')).toBe(true);
+    expect(canManageOrders('MANAGER')).toBe(true);
+    expect(canManageOrders('STAFF')).toBe(false);
+    expect(canManageOrders(null)).toBeNull();
   });
 });

@@ -5,7 +5,7 @@ import { Button } from '@cf/ui';
 import { useEffect, useRef, useState } from 'react';
 import { AccessNotice } from '@/components/AccessNotice';
 import type { AccessDenied } from '@/lib/api-errors';
-import { refundDeadlineOf, RETRY_SENT, retryFailure } from '@/lib/claim/retry';
+import { refundDeadlineOf, RETRY_MANAGER_ONLY, RETRY_SENT, retryFailure } from '@/lib/claim/retry';
 import { adminClaimRetryPath, type ClaimDetail } from '@/lib/claim/types';
 import { ClaimDecisions } from './ClaimDecisions';
 import { formatClaimTime } from './ClaimTable';
@@ -13,13 +13,25 @@ import { formatClaimTime } from './ClaimTable';
 type Notice = { tone: 'info' | 'error'; message: string };
 
 /**
- * 결제 후 취소 처리 상황 + "다시 시도"(#30 · BE #17 A2b) + 운영자 확정 · 종결(`ClaimDecisions`, #17 A3). 반품 접수에는 그리지 않는다(대상이 아니다).
+ * 처리 상황 칸을 그릴지. 결제 후 취소는 늘, 반품은 승인된 뒤(`returnApproval`)에만 그린다 — 승인된 반품도 취소와 같은 처리 상황 · 버튼 플래그 ·
+ * 수습 API 를 쓴다(api-design-guide §2-16 "반품 수습 (#17 B2b)"). 접수 · 거절 반품은 반품 결정 칸(`ClaimReturnDecision`)이 맡아 겹쳐 보이지 않는다.
+ * 그때도 서버가 버튼 플래그를 하나라도 주면 그린다 — 버튼 노출은 화면이 판정하지 않고 서버 플래그를 따른다.
+ */
+export function showsRecovery(claim: ClaimDetail): boolean {
+  if (claim.type.code === 'CANCELLATION' || claim.returnApproval) return true;
+  const { retryable, refundConfirmable, completable } = claim.recovery;
+  return retryable || refundConfirmable || completable;
+}
+
+/**
+ * 결제 후 취소 · 승인된 반품의 처리 상황 + "다시 시도"(#30 · BE #17 A2b · B2b) + 운영자 확정 · 종결(`ClaimDecisions`, #17 A3).
  * 버튼은 서버 `retryable` 일 때만 두고, 한 번 더 확인한 뒤 보낸다. 보내는 중에는 다시 누를 수 없다.
  * 성공 · 실패 문구는 이 칸에 둔다 — 상세를 다시 읽어도 이 칸은 그대로라 문구가 남는다.
  */
 export function ClaimRecovery({
   claim,
   canSettle = null,
+  canManageOrders = null,
   onUpdated,
   onReload,
   now,
@@ -27,6 +39,8 @@ export function ClaimRecovery({
   claim: ClaimDetail;
   /** 정산 쓰기 권한(`canManageSettlement`) — 확정 · 종결 버튼을 거른다. null(모름)이면 숨기지 않는다 */
   canSettle?: boolean | null;
+  /** 주문 쓰기 권한(`canManageOrders`, ORDER_MANAGE) — 다시 시도 버튼을 거른다. null(모름)이면 숨기지 않는다 */
+  canManageOrders?: boolean | null;
   /** 다시 시도 응답(현재 상세)으로 화면을 바꾼다 */
   onUpdated: (claim: ClaimDetail) => void;
   /** 서버 상태가 화면과 다를 수 있을 때 상세를 다시 읽는다(화면은 그대로 둔 채) */
@@ -57,9 +71,8 @@ export function ClaimRecovery({
     )?.focus();
   });
 
-  if (claim.type.code !== 'CANCELLATION') return null;
-
   const { recovery } = claim;
+  if (!showsRecovery(claim)) return null;
   const deadline = refundDeadlineOf(claim, now ?? shownAt);
 
   const send = () => {
@@ -124,7 +137,7 @@ export function ClaimRecovery({
           <>
             <dt className="text-muted-fg">결제 취소 기한</dt>
             <dd>
-              {formatClaimTime(deadline.at.toISOString())} (접수 + 14일) ·{' '}
+              {formatClaimTime(deadline.at.toISOString())} ({deadline.basis} + 14일) ·{' '}
               {deadline.remaining ?? '지났습니다'}
             </dd>
           </>
@@ -142,11 +155,16 @@ export function ClaimRecovery({
         )}
       </dl>
 
+      {recovery.retryable && canManageOrders === false && (
+        <p className="text-sm text-muted-fg">{RETRY_MANAGER_ONLY}</p>
+      )}
       {recovery.retryable &&
+        canManageOrders !== false &&
         (confirming ? (
           <div className="flex flex-col gap-3 rounded-md bg-muted p-3">
             <p className="text-sm">
-              같은 접수 · 같은 금액으로 결제 취소와 재고 복원을 다시 보냅니다. 다시 시도할까요?
+              같은 접수 · 같은 금액으로 결제 취소와 재고 복원(필요할 때)을 다시 보냅니다. 다시
+              시도할까요?
             </p>
             <div className="flex flex-wrap items-center gap-3">
               {/* 보내는 중에도 disabled 로 두지 않는다 — 포커스가 body 로 빠진다. 겹친 요청은 send 가 막는다 */}

@@ -6,7 +6,9 @@ import { ClaimDecisions } from './ClaimDecisions';
 import { ClaimDetailView } from './ClaimDetailView';
 import { ClaimFilters } from './ClaimFilters';
 import { ClaimList } from './ClaimList';
+import { ClaimQuickFilters, PAYMENT_UNKNOWN_HREF } from './ClaimQuickFilters';
 import { ClaimRecovery } from './ClaimRecovery';
+import { ClaimReturnDecision } from './ClaimReturnDecision';
 import { ClaimTable, formatClaimTime } from './ClaimTable';
 import { OrderClaimsBody } from './OrderClaims';
 
@@ -40,6 +42,8 @@ const detail = (overrides: Partial<ClaimDetail> = {}): ClaimDetail => ({
     lastDecision: null,
     version: 0,
   },
+  returnApproval: null,
+  returnDecision: null,
   ...overrides,
 });
 
@@ -272,15 +276,16 @@ describe('ClaimDecisions · 마지막 운영자 결정', () => {
     );
   });
 
-  it('반품 접수에는 그리지 않는다', () => {
-    expect(
-      decisions(
-        detail({
-          recovery: { ...detail().recovery, refundConfirmable: true, completable: true },
-        }),
-        true,
-      ),
-    ).toBe('');
+  it('유형을 보지 않고 서버 플래그를 따른다 — 플래그가 없는 반품은 그리지 않고, 플래그가 오면 반품도 보인다', () => {
+    expect(decisions(detail(), true)).toBe('');
+    const flagged = decisions(
+      detail({
+        recovery: { ...detail().recovery, refundConfirmable: true, completable: true },
+      }),
+      true,
+    );
+    expect(flagged).toContain('>환불 완료로 확정</button>');
+    expect(flagged).toContain('>재고 복원 없이 종결</button>');
   });
 
   it('처리 상황 칸 안에 결정 버튼과 마지막 운영자 결정(사유 · 시각)을 보인다', () => {
@@ -309,5 +314,359 @@ describe('ClaimDecisions · 마지막 운영자 결정', () => {
       <ClaimRecovery claim={cancellation({})} onUpdated={vi.fn()} onReload={vi.fn()} />,
     );
     expect(html).not.toContain('마지막 운영자 결정');
+  });
+});
+
+describe('ClaimQuickFilters', () => {
+  it('확인이 필요한 건 바로가기를 두고, 지금 조건과 같으면 선택 표시한다', () => {
+    const html = renderToStaticMarkup(
+      <ClaimQuickFilters
+        query={{ ...DEFAULT_QUERY, type: 'RETURN', status: 'REQUESTED', page: 2 }}
+        showPayments
+      />,
+    );
+    expect(html).toContain('확인이 필요한 건');
+    expect(html).toMatch(
+      /aria-current="page"[^>]*href="\/claims\?type=RETURN&amp;status=REQUESTED"/,
+    );
+    expect(html).toContain('href="/claims?status=REFUND_FAILED"');
+    expect(html).toContain('href="/claims?status=RESTORATION_FAILED"');
+    expect(html.match(/aria-current/g)).toHaveLength(1);
+    expect(html).toContain(`href="${PAYMENT_UNKNOWN_HREF}"`);
+    expect(PAYMENT_UNKNOWN_HREF).toBe('/payments?status=UNKNOWN');
+  });
+
+  it('결제 확인 권한이 없으면 결제 확인 중 바로가기를 두지 않는다 · 조건이 다르면 선택 표시가 없다', () => {
+    const html = renderToStaticMarkup(
+      <ClaimQuickFilters
+        query={{ ...DEFAULT_QUERY, status: 'REFUND_FAILED', orderId: '7' }}
+        showPayments={false}
+      />,
+    );
+    expect(html).not.toContain('결제 확인 중');
+    expect(html).not.toContain('aria-current');
+  });
+
+  it('목록 화면 위에 그린다', () => {
+    const html = renderToStaticMarkup(<ClaimList query={DEFAULT_QUERY} showPayments={false} />);
+    expect(html).toContain('반품 승인 대기');
+    expect(html).not.toContain('결제 확인 중');
+  });
+});
+
+describe('ClaimReturnDecision', () => {
+  const fault = (code: string, name: string) => ({ code, name, description: '' });
+  const decision = (overrides: Partial<NonNullable<ClaimDetail['returnDecision']>> = {}) => ({
+    approvable: true,
+    rejectable: true,
+    reason: null,
+    defaultFault: fault('SELLER', '판매자 귀책'),
+    refundByFault: [
+      {
+        fault: fault('CUSTOMER', '고객 귀책'),
+        amount: { amount: 90000, currency: 'KRW' as const },
+      },
+      {
+        fault: fault('SELLER', '판매자 귀책'),
+        amount: { amount: 96000, currency: 'KRW' as const },
+      },
+    ],
+    ...overrides,
+  });
+  const render = (claim: ClaimDetail, canManage: boolean | null) =>
+    renderToStaticMarkup(
+      <ClaimReturnDecision
+        claim={claim}
+        canManage={canManage}
+        onUpdated={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    );
+
+  it('취소 클레임 · 미리보기 없는 접수 반품에는 그리지 않는다', () => {
+    expect(
+      render(
+        detail({
+          type: { code: 'CANCELLATION', name: '결제 후 취소', description: '' },
+          returnDecision: decision(),
+        }),
+        true,
+      ),
+    ).toBe('');
+    expect(render(detail(), true)).toBe('');
+  });
+
+  it('승인할 수 있으면 귀책(기본 표시) · 재고 선택 · 차감액과 환불 예정액 내역, 승인 · 거절 버튼을 보인다', () => {
+    const html = render(detail({ returnDecision: decision() }), true);
+    expect(html).toContain('data-tour="claim-return-decision"');
+    expect(html).toContain('판매자 귀책 (기본)');
+    expect(html).toContain('정책 환불액 96,000원');
+    // 기본 귀책이 골라져 있고 재고는 아무것도 골라져 있지 않다
+    expect(html).toMatch(/checked="" value="SELLER"/);
+    expect(html).not.toMatch(/checked="" value="CUSTOMER"/);
+    expect(html).toContain('재고로 되돌림');
+    expect(html).toContain('되돌리지 않음');
+    expect(html.match(/name="[^"]*-restock"[^>]*checked/g)).toBeNull();
+    expect(html).toContain('value="0"');
+    expect(html).toContain('환불 예정액');
+    expect(html).toContain('− 0원');
+    // 재고를 고르기 전이라 승인은 aria-disabled
+    expect(html).toMatch(/aria-disabled="true"[^>]*>반품 승인<\/button>/);
+    expect(html).toContain('>반품 거절</button>');
+    expect(html).not.toContain('ORDER_');
+  });
+
+  it('정책 환불액이 0 이하인 귀책은 승인할 수 없다고 바로 알린다', () => {
+    const html = render(
+      detail({
+        returnDecision: decision({
+          refundByFault: [
+            { fault: fault('SELLER', '판매자 귀책'), amount: { amount: -2000, currency: 'KRW' } },
+          ],
+        }),
+      }),
+      true,
+    );
+    expect(html).toContain('이 귀책으로는 승인할 수 없습니다.');
+    expect(html).toContain('정책 환불액이 0원 이하라 승인할 수 없습니다');
+  });
+
+  it('승인할 수 없으면 이유 name · description 을 그대로 보이고 거절만 둔다', () => {
+    const html = render(
+      detail({
+        returnDecision: decision({
+          approvable: false,
+          reason: {
+            code: 'REFUND_NOT_OPEN',
+            name: '자동 환불 꺼짐',
+            description: '자동 환불 처리가 꺼져 있습니다.',
+          },
+        }),
+      }),
+      true,
+    );
+    expect(html).toContain('지금은 승인할 수 없습니다 — 자동 환불 꺼짐');
+    expect(html).toContain('자동 환불 처리가 꺼져 있습니다.');
+    expect(html).toContain('정책 환불액 (판매자 귀책)');
+    expect(html).not.toContain('>반품 승인</button>');
+    expect(html).toContain('>반품 거절</button>');
+  });
+
+  it('주문 관리 권한이 없으면(STAFF) 버튼 대신 안내한다 · 역할을 모르면 숨기지 않는다', () => {
+    const staff = render(detail({ returnDecision: decision() }), false);
+    expect(staff).toContain('주문 관리 권한이 있는 운영자');
+    expect(staff).not.toContain('반품 승인</button>');
+    expect(staff).not.toContain('반품 거절</button>');
+
+    const unknown = render(detail({ returnDecision: decision() }), null);
+    expect(unknown).toContain('반품 승인</button>');
+  });
+
+  it('승인된 반품은 승인 내용을 읽기 전용으로 보인다 — 처리 상황은 처리 상황 칸이 맡는다', () => {
+    const html = render(
+      detail({
+        status: { code: 'REFUND_FAILED', name: '환불 실패', description: '' },
+        expectedRefund: { amount: 93000, currency: 'KRW' },
+        recovery: {
+          situation: { code: 'REFUND_REJECTED', name: '환불 거절', description: '결제사 거절' },
+          nextAutomaticAttemptAt: null,
+          retryable: false,
+          refundConfirmable: true,
+          completable: false,
+          lastDecision: null,
+          version: 6,
+        },
+        returnApproval: {
+          fault: fault('CUSTOMER', '고객 귀책'),
+          restock: false,
+          deduction: { amount: 3000, currency: 'KRW' },
+          approvedAt: '2026-11-02T01:00:00Z',
+        },
+      }),
+      true,
+    );
+    expect(html).toContain('반품 승인 내용');
+    expect(html).toContain('고객 귀책');
+    expect(html).toContain('되돌리지 않음');
+    expect(html).toContain('3,000원');
+    expect(html).toContain('93,000원');
+    expect(html).toContain(formatClaimTime('2026-11-02T01:00:00Z'));
+    expect(html).not.toContain('결제사 거절');
+    expect(html).not.toContain('</button>');
+  });
+
+  it('거절된 반품은 거절 사유 · 시각을 보인다', () => {
+    const html = render(
+      detail({
+        status: { code: 'REJECTED', name: '거절', description: '' },
+        recovery: {
+          situation: { code: 'NO_ACTION', name: '처리할 일 없음', description: '' },
+          nextAutomaticAttemptAt: null,
+          retryable: false,
+          refundConfirmable: false,
+          completable: false,
+          lastDecision: { reason: '착용 흔적', decidedAt: '2026-11-03T01:00:00Z' },
+          version: 7,
+        },
+      }),
+      true,
+    );
+    expect(html).toContain('반품 거절 내용');
+    expect(html).toContain('착용 흔적');
+  });
+});
+
+describe('ClaimRecovery · 승인된 반품(#17 B2b)', () => {
+  const approvedReturn = (recovery: Partial<ClaimDetail['recovery']>) =>
+    detail({
+      status: { code: 'REFUND_FAILED', name: '환불 실패', description: '' },
+      recovery: {
+        situation: { code: 'REFUND_UNCONFIRMED', name: '환불 미확정', description: '확인 필요' },
+        nextAutomaticAttemptAt: null,
+        retryable: false,
+        refundConfirmable: false,
+        completable: false,
+        lastDecision: null,
+        version: 8,
+        ...recovery,
+      },
+      returnApproval: {
+        fault: { code: 'SELLER', name: '판매자 귀책', description: '' },
+        restock: true,
+        deduction: { amount: 0, currency: 'KRW' },
+        approvedAt: '2026-11-05T00:00:00Z',
+      },
+    });
+  const render = (claim: ClaimDetail, canSettle: boolean | null = true) =>
+    renderToStaticMarkup(
+      <ClaimRecovery
+        claim={claim}
+        canSettle={canSettle}
+        onUpdated={vi.fn()}
+        onReload={vi.fn()}
+        now={Date.parse('2026-11-10T00:00:00Z')}
+      />,
+    );
+
+  it('환불 실패 반품은 서버 retryable 대로 다시 시도 버튼과 승인 + 14일 기한을 보인다', () => {
+    const html = render(approvedReturn({ retryable: true }));
+    expect(html).toContain('data-tour="claim-recovery"');
+    expect(html).toContain('환불 미확정');
+    expect(html).toContain('(승인 + 14일)');
+    expect(html).toContain(formatClaimTime('2026-11-19T00:00:00Z'));
+    expect(html).toContain('9일 남음');
+    expect(html).toContain('>다시 시도</button>');
+
+    expect(render(approvedReturn({ retryable: false }))).not.toContain('>다시 시도</button>');
+  });
+
+  it('반품도 확정 · 종결 버튼은 서버 플래그대로, 대표 관리자에게만 보인다', () => {
+    const confirmable = render(
+      approvedReturn({
+        situation: { code: 'REFUND_REJECTED', name: '환불 거절', description: '' },
+        refundConfirmable: true,
+      }),
+    );
+    expect(confirmable).toContain('>환불 완료로 확정</button>');
+    expect(confirmable).not.toContain('재고 복원 없이 종결');
+
+    const completable = approvedReturn({
+      situation: { code: 'RESTORATION_REJECTED', name: '복원 거절', description: '' },
+      completable: true,
+    });
+    expect(render(completable)).toContain('>재고 복원 없이 종결</button>');
+    const manager = render(completable, false);
+    expect(manager).not.toContain('</button>');
+    expect(manager).toContain('대표 관리자만');
+  });
+
+  it('접수 · 거절 반품은 서버 플래그가 모두 false 면 처리 상황 칸을 그리지 않는다(반품 결정 칸과 겹치지 않는다)', () => {
+    expect(render(detail())).toBe('');
+    expect(render(detail({ status: { code: 'REJECTED', name: '거절', description: '' } }))).toBe(
+      '',
+    );
+  });
+});
+
+describe('ClaimRecovery · 다시 시도 권한', () => {
+  const retryable = detail({
+    type: { code: 'CANCELLATION', name: '결제 후 취소', description: '' },
+    status: { code: 'REFUND_FAILED', name: '환불 실패', description: '' },
+    recovery: {
+      situation: { code: 'RESTORATION_UNCONFIRMED', name: '복원 미확정', description: '' },
+      nextAutomaticAttemptAt: null,
+      retryable: true,
+      refundConfirmable: false,
+      completable: false,
+      lastDecision: null,
+      version: 2,
+    },
+  });
+  const render = (canManageOrders: boolean | null) =>
+    renderToStaticMarkup(
+      <ClaimRecovery
+        claim={retryable}
+        canManageOrders={canManageOrders}
+        onUpdated={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    );
+
+  it('주문 관리 권한이 없으면(STAFF) 다시 시도 버튼 대신 안내한다 · 역할을 모르면 숨기지 않는다', () => {
+    const staff = render(false);
+    expect(staff).not.toContain('>다시 시도</button>');
+    expect(staff).toContain('주문 관리 권한이 있는 운영자');
+    expect(render(null)).toContain('>다시 시도</button>');
+    expect(render(true)).toContain('>다시 시도</button>');
+  });
+});
+
+describe('ClaimReturnDecision · 표기', () => {
+  const fault = (code: string, name: string, description = '') => ({ code, name, description });
+
+  it('차감액 칸 이름은 통화 코드 대신 단위 말로, 귀책 설명은 툴팁이 아니라 글자로 보인다', () => {
+    const pending = renderToStaticMarkup(
+      <ClaimReturnDecision
+        claim={detail({
+          returnDecision: {
+            approvable: true,
+            rejectable: true,
+            reason: null,
+            defaultFault: fault('SELLER', '판매자 귀책'),
+            refundByFault: [
+              {
+                fault: fault('SELLER', '판매자 귀책', '상품 하자 · 오배송'),
+                amount: { amount: 8950, currency: 'USD' },
+              },
+            ],
+          },
+        })}
+        canManage
+        onUpdated={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    );
+    expect(pending).toContain('차감액 (달러, 센트까지)');
+    expect(pending).not.toContain('(USD)');
+    expect(pending).toContain('상품 하자 · 오배송');
+
+    const approved = renderToStaticMarkup(
+      <ClaimReturnDecision
+        claim={detail({
+          status: { code: 'COMPLETED', name: '완료', description: '' },
+          returnApproval: {
+            fault: fault('CUSTOMER', '고객 귀책', '단순 변심'),
+            restock: true,
+            deduction: { amount: 0, currency: 'KRW' },
+            approvedAt: '2026-11-02T01:00:00Z',
+          },
+        })}
+        canManage
+        onUpdated={vi.fn()}
+        onReload={vi.fn()}
+      />,
+    );
+    expect(approved).toContain('>단순 변심<');
+    expect(approved).not.toContain('title="단순 변심"');
   });
 });

@@ -46,6 +46,8 @@ const claim = (
       lastDecision: null,
       version: 3,
     },
+    returnApproval: null,
+    returnDecision: null,
   }) satisfies ClaimDetail;
 
 describe('decisionPath', () => {
@@ -86,10 +88,16 @@ describe('decisionActions · decisionNeedsOwner', () => {
     expect(decisionNeedsOwner(claim(), false)).toBe(false);
   });
 
-  it('반품 접수에는 플래그가 와도 보이지 않는다', () => {
+  it('승인된 반품도 유형을 보지 않고 서버 플래그대로 보인다(#17 B2b) · 대표 전용 규칙은 같다', () => {
     const ret = claim({ refundConfirmable: true, completable: true }, 'RETURN');
-    expect(decisionActions(ret, true)).toEqual([]);
-    expect(decisionNeedsOwner(ret, false)).toBe(false);
+    expect(decisionActions(ret, true)).toEqual(['refundConfirmation', 'completion']);
+    expect(decisionActions(ret, null)).toEqual(['refundConfirmation', 'completion']);
+    expect(decisionActions(ret, false)).toEqual([]);
+    expect(decisionNeedsOwner(ret, false)).toBe(true);
+    // 접수 · 거절 반품처럼 서버가 플래그를 주지 않으면 버튼도 안내도 없다
+    const pending = claim({}, 'RETURN');
+    expect(decisionActions(pending, true)).toEqual([]);
+    expect(decisionNeedsOwner(pending, false)).toBe(false);
   });
 });
 
