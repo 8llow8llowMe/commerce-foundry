@@ -216,6 +216,19 @@ operations:
     dlt-alert:
       enabled: ${DLT_ALERT_ENABLED:false}
       suppression: 1h
+    # 품절 임박 정기 점검 (#229, stock-alert-guide.md). 운영 DDL(low_stock_alert_state · low_stock_alert_sku) 적용 · 배포 뒤 켠다. 롤백은 OFF.
+    # 값이 빠지면 아래 기본값, 범위를 벗어나면 기동하지 않는다 (LowStockAlertProperties). max-pages 상한 40 (페이지당 SKU 100개)
+    low-stock-alert:
+      enabled: ${LOW_STOCK_ALERT_ENABLED:false}
+      initial-delay: 2m
+      fixed-delay: 10m
+      max-pages: 20
+      # 완전 스캔에서 이 시간 이상 연속으로 빠진 SKU 는 해소로 보고 추적을 끝낸다 — 재고 선점 TTL(30분)보다 길게
+      resolve-after: 6h
+      # 새 SKU 가 없어도 품절 임박이 남아 있으면 마지막 알림 뒤 이 간격마다 한 번 다시 알린다
+      reminder-interval: 7d
+      # 점검 한 번의 상한(ShedLock lease). 넘긴 점검은 저장하지 않는다
+      lock-at-most: 5m
     # SSE 연결을 붙잡는 시간. 끊기면 클라이언트는 목록 조회로 따라잡고 다시 연다
     stream-timeout: 5m
     # 알림이 없어도 이 간격으로 주석을 보낸다. 게이트웨이 response-timeout(10s) 동안 바이트가 없으면 연결이 끊긴다
