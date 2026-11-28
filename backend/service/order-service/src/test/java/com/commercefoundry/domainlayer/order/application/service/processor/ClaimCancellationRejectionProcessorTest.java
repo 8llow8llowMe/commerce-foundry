@@ -347,7 +347,19 @@ class ClaimCancellationRejectionProcessorTest {
     @DisplayName("거절 기록 — 클레임 저장의 낙관락에서 지면 409 ORDER_037 이고 주문은 저장하지 않는다")
     void claimSaveConflictIsConcurrentChange() {
         eligible(OrderStatus.PAID);
-        when(claims.update(any())).thenThrow(new OptimisticLockingFailureException("stale claim"));
+        // when(...) 로 다시 걸면 @BeforeEach 의 thenAnswer 가 null 인자로 먼저 불린다 — doThrow 로 건다
+        doThrow(new OptimisticLockingFailureException("stale claim")).when(claims).update(any());
+
+        assertCode(() -> processor.reject(CLAIM_ID, VERSION, REASON, ADMIN), OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
+
+        verify(orders, never()).saveStatusChange(any(), any());
+    }
+
+    @Test
+    @DisplayName("거절 기록 — 클레임 저장에서 DB 가 잠금 대기 · 교착으로 이쪽을 끊으면 500 이 아니라 409 ORDER_037 이다")
+    void lockFailureOnClaimSaveIsConcurrentChange() {
+        eligible(OrderStatus.PAID);
+        doThrow(new CannotAcquireLockException("deadlock detected")).when(claims).update(any());
 
         assertCode(() -> processor.reject(CLAIM_ID, VERSION, REASON, ADMIN), OrderErrorCode.CLAIM_CONCURRENTLY_CHANGED);
 

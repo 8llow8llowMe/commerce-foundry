@@ -401,9 +401,11 @@ class OrderCancellationProcessorTest {
     @DisplayName("거절된 취소에 환불 성공이 오면(봉인 뒤라 오면 안 된다) 기록하지 않는다 — 전이 예외이고 클레임 · 주문을 저장하지 않는다(CANCELLATION_REFUND_AFTER_REJECTION 로그)")
     void refundSuccessAfterRejectionIsNotRecorded() {
         Claim rejected = rejectedCancellation();
-        when(orders.findById(rejected.orderId())).thenReturn(Optional.of(order(OrderStatus.PAID)));
+        // 환불 반영은 주문을 먼저 잠근다(#684 PR-2) — 주문 없음 예외로 우연히 통과하지 않게 잠금 조회에 주문을 준다
+        when(orders.findByIdForUpdate(rejected.orderId())).thenReturn(Optional.of(order(OrderStatus.PAID)));
 
-        assertThatThrownBy(() -> processor(false).recordRefund(rejected, CancellationStepOutcome.done())).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> processor(false).recordRefund(rejected, CancellationStepOutcome.done())).isInstanceOf(IllegalStateException.class)
+            .hasMessageNotContaining("claim order not found");
 
         verify(claims, never()).update(any());
         verify(orders, never()).saveStatusChange(any(), any());
