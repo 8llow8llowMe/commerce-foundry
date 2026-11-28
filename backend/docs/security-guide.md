@@ -948,6 +948,7 @@ public ResponseEntity<Response<StockReservationResponse>> reserve(@RequestBody @
   | `GET /internal/v1/order-payments/{paymentId}` | `SERVICE_payment-service` | 저장된 최초 반영 결과 읽기, 회원 필터 없음 (#308 C1a). 현재 주문 상태 · 복원 진행 정보는 내리지 않는다 |
   | `POST /internal/v1/orders/{orderId}/shipment` | `SERVICE_delivery-service` | 주문 상태 `SHIPPING` 전이 (#18) |
   | `POST /internal/v1/orders/{orderId}/delivery-completion` | `SERVICE_delivery-service` | 주문 상태 `DELIVERED` 전이 (#18) |
+  | `GET /internal/v1/payment-restorations/observation` | `SERVICE_operations-service` | 읽기, 재고 복원 대기 · HELD 건수 · 최소 등록시각 · 관측시각만 반환. 주문 · 결제 아이디 없음, `no-store` (#808) |
   | `GET /internal/v1/orders/picking-snapshots?orderIds=` | `SERVICE_delivery-service` | 읽기, 피킹용 주문 스냅숏(상태 · 국가 코드 · 항목 SKU · 수량 · 제작 여부) 최대 20건. 받는 분 · 연락처 · 주소는 SELECT 하지 않는다 (#363) |
 
   출고 · 배송 완료는 회원 소유를 보지 않는 운영 흐름 명령이라 delivery-service 외 서비스(payment 포함)는 403 이다. 컨트롤러 테스트가 경로마다 허용 · 거부 호출자를 본다.

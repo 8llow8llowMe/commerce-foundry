@@ -156,6 +156,14 @@ ID projection + limit 한 번이며 count/잠금/개인정보 로딩이 없다. 
 성공은 공통 봉투의 `{observedAt, readyUnpublishedCount, oldestReadyAvailableAt}` 세 필드와 `Cache-Control: no-store`다.
 관측시각은 Clock을 한 번 읽고 마이크로초 미만을 버린 조회 기준이며, 단일 집계로 미발행 중 `availableAt <= observedAt`인 행만 센다.
 빈 결과·미래 예약만 있는 결과는 `0/null`, 정확한 시각 경계는 포함한다. DB·트랜잭션 실패는 503 `OUTBOX_OBSERVATION_001`이며 정상·해소로 바꾸지 않는다.
+
+### 1-5a. 결제 반영 재고 복원 작업 관측 (order-service, #808)
+
+`GET /internal/v1/payment-restorations/observation`은 인자 없는 읽기 전용 internal API이며 `SERVICE_operations-service`만 허용한다(`@Hidden`).
+성공은 공통 봉투의 `{observedAt, pendingCount, oldestPendingCreatedAt, heldCount, oldestHeldCreatedAt}` 다섯 필드와 `Cache-Control: no-store`다.
+관측시각은 Clock을 한 번 읽고 마이크로초 미만을 버린 조회 기준이며, 단일 집계로 `orders.order_stock_restoration` 중 `created_at <= observedAt`인
+`RESTORE_PENDING` · `HELD` 행만 센다. 수가 0이면 시각은 null이다. 주문 · 결제 · 선점 아이디는 내리지 않는다.
+DB·트랜잭션 실패는 503 `ORDER_047`이며 0건·해소로 바꾸지 않는다. 지표 · 판정 의미는 `order-flow-guide.md` §3-6 "#582 지표 · 적체 경고".
 결제·메시징 게이트와 독립적으로 읽는다. operations 수집기·알림·해소 판정은 후속이며 [원천 관측 계약](outbox-observation-guide.md)을 따른다.
 
 `GET /internal/v1/payment-observations/anomalies`는 operations 전용 결제 이상 후보 원천이다(`@Hidden`, 공통 봉투 200, no-store).
