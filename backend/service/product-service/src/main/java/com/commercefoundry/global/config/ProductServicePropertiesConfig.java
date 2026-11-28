@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Import;
     InternalTokenPropertiesConfig.class,
     JwtVerificationPropertiesConfig.class,
     MessagingPropertiesConfig.class,
+    PriceSourceModeGuard.class,
     SnowflakePropertiesConfig.class,
     StoragePropertiesConfig.class,
     SwaggerPropertiesConfig.class

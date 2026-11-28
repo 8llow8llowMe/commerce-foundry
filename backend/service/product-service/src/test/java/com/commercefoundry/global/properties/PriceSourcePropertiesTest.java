@@ -48,15 +48,22 @@ class PriceSourcePropertiesTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"PRICE_BOOK", "INVALID_MODE"})
-    void reservedAndUnknownModesFailDuringBindingBeforeApplicationRunners(String value) {
+    void reservedAndUnknownModesFailDuringContextStartupBeforeApplicationRunners(String value) {
         runner.withPropertyValues("price-source.mode=" + value, "price-backfill.mode=APPLY").run(context -> {
             assertThat(context).hasFailed();
             assertThat(context.getStartupFailure()).hasStackTraceContaining("price-source");
             if (value.equals("PRICE_BOOK")) {
+                // 바인딩은 받고(D6) 기동 검증 빈이 거절한다. B7 에서 PriceSourceModeGuard 를 지우면 해제된다.
                 assertThat(context.getStartupFailure()).hasRootCauseInstanceOf(IllegalArgumentException.class)
-                    .hasRootCauseMessage("가격 정본 전환은 아직 지원하지 않습니다");
+                    .hasRootCauseMessage("price-source.mode=PRICE_BOOK 는 아직 지원하지 않습니다");
             }
         });
+    }
+
+    @Test
+    void priceBookBindsAsValueSoWriterModeBranchCanBeTested() {
+        assertThat(new PriceSourceProperties(PriceSourceProperties.Mode.PRICE_BOOK).mode())
+            .isEqualTo(PriceSourceProperties.Mode.PRICE_BOOK);
     }
 
     private static String temporarySecret() {
