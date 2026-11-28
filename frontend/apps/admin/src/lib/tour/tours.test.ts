@@ -23,6 +23,9 @@ describe('helpTopicFor · toursFor', () => {
   it('경로마다 도움말을 고르고, 없는 경로는 기본 도움말이다', () => {
     expect(helpTopicFor('/size-charts/42').title).toBe('사이즈표 입력');
     expect(helpTopicFor('/size-charts').title).toBe('상품 사이즈표');
+    // 일괄 화면은 상품별 입력 패턴(`/size-charts/{상품}`)보다 먼저 맞아 편집기 투어가 뜨지 않는다
+    expect(helpTopicFor('/size-charts/batch').title).toBe('여러 상품 AI 초안 요청');
+    expect(helpTopicFor('/size-charts/batch').tour).toBeNull();
     expect(helpTopicFor('/stocks/7').title).toBe('옵션별 재고');
     expect(helpTopicFor('/jobs/9').title).toBe('백그라운드 작업');
     expect(helpTopicFor('/practice').title).toBe('샘플 주문 업무 연습');
